@@ -1,4 +1,4 @@
-# Calendar Widget
+# Google Calendar Widget
 
 Windows 바탕화면에 띄우는 프레임리스 Google Calendar 위젯 (Electron 기반).
 
