@@ -26,6 +26,8 @@ Windows 바탕화면에 띄우는 프레임리스 Google Calendar 위젯 (Electr
 npm install
 ```
 
+> `npm warn allow-scripts ...` 경고가 뜰 수 있는데, Electron 바이너리 다운로드(postinstall)에는 지장이 없습니다. 혹시 `node_modules/electron/dist/electron.exe`가 없다면 `npm rebuild electron`을 실행해보세요.
+
 ## Google Cloud OAuth 설정 (필수, 최초 1회)
 
 이 앱은 사용자 본인의 Google Calendar 데이터를 읽기 위해 OAuth 2.0 "Desktop app(설치된 앱)" 클라이언트가 필요합니다. **각 사용자가 자기 자신의 클라이언트를 직접 만들어야 합니다** (저장소에 포함된 코드에는 시크릿이 없습니다).
