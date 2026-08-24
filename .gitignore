@@ -1,0 +1,10 @@
+node_modules/
+
+# OAuth client secret and tokens — never commit these
+credentials.json
+token.json
+auth/.test-userdata/
+
+# OS/editor cruft
+.DS_Store
+Thumbs.db

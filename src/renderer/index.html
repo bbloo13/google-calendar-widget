@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>Calendar Widget</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="gridPanel" id="gridPanel">
+      <div class="gridPanel__nav">
+        <button class="widget__iconBtn" id="prevMonthBtn">‹</button>
+        <span class="gridPanel__label" id="monthLabel">-</span>
+        <button class="widget__iconBtn" id="nextMonthBtn">›</button>
+      </div>
+      <div class="gridPanel__weekdays">
+        <span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span><span>일</span>
+      </div>
+      <div class="gridPanel__weeks" id="monthWeeks"></div>
+    </div>
+
+    <div class="widget" id="widget">
+      <header class="widget__header">
+        <div class="widget__date">
+          <div class="widget__weekday" id="weekday">-</div>
+          <div class="widget__daynum" id="daynum">-</div>
+          <div class="widget__month" id="month">-</div>
+        </div>
+        <div class="widget__headerBtns">
+          <button class="widget__iconBtn" id="gridToggleBtn" title="월 달력">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="0.5" y="0.5" width="5.5" height="5.5" rx="1" fill="currentColor" opacity="0.9"/>
+              <rect x="8" y="0.5" width="5.5" height="5.5" rx="1" fill="currentColor" opacity="0.5"/>
+              <rect x="0.5" y="8" width="5.5" height="5.5" rx="1" fill="currentColor" opacity="0.5"/>
+              <rect x="8" y="8" width="5.5" height="5.5" rx="1" fill="currentColor" opacity="0.5"/>
+            </svg>
+          </button>
+          <button class="widget__iconBtn" id="addEventBtn" title="Google 캘린더 열기">+</button>
+          <button class="widget__iconBtn" id="refreshBtn" title="새로고침">⟳</button>
+        </div>
+      </header>
+
+      <div class="widget__viewToggle" id="viewToggle">
+        <button class="widget__viewBtn is-active" data-view="day">일</button>
+        <button class="widget__viewBtn" data-view="week">주</button>
+      </div>
+
+      <section class="widget__agenda" id="agenda"></section>
+
+      <footer class="widget__footer" id="footer"></footer>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>
