@@ -240,6 +240,54 @@ async function fetchMonthView(auth, monthOffset = 0) {
 }
 
 /**
+ * Creates a single (optionally multi-day) event on the user's primary calendar.
+ * `date` is required ('YYYY-MM-DD'); `endDate` defaults to `date`. `time`/`endTime`
+ * ('HH:MM') are optional — omitting them creates an all-day event.
+ */
+async function createEvent(auth, { title, date, endDate, time, endTime, description }) {
+  const calendar = google.calendar({ version: 'v3', auth });
+  const finalEndDate = endDate && endDate >= date ? endDate : date;
+
+  let start;
+  let end;
+  if (time) {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    start = { dateTime: `${date}T${time}:00`, timeZone: tz };
+    end = { dateTime: `${finalEndDate}T${endTime || time}:00`, timeZone: tz };
+  } else {
+    // All-day events use Google's exclusive end date — the user picks the last
+    // inclusive day, so step one day past it.
+    const nextDay = addDays(new Date(`${finalEndDate}T00:00:00`), 1);
+    const y = nextDay.getFullYear();
+    const m = String(nextDay.getMonth() + 1).padStart(2, '0');
+    const d = String(nextDay.getDate()).padStart(2, '0');
+    start = { date };
+    end = { date: `${y}-${m}-${d}` };
+  }
+
+  const res = await calendar.events.insert({
+    calendarId: 'primary',
+    resource: { summary: title, description, start, end },
+  });
+  return res.data;
+}
+
+/** Patches only the given fields (title and/or description) of an existing primary-calendar event. */
+async function updateEvent(auth, eventId, { title, description }) {
+  const calendar = google.calendar({ version: 'v3', auth });
+  const resource = {};
+  if (title !== undefined) resource.summary = title;
+  if (description !== undefined) resource.description = description;
+  const res = await calendar.events.patch({ calendarId: 'primary', eventId, resource });
+  return res.data;
+}
+
+async function deleteEvent(auth, eventId) {
+  const calendar = google.calendar({ version: 'v3', auth });
+  await calendar.events.delete({ calendarId: 'primary', eventId });
+}
+
+/**
  * Fetches the agenda for the given view ('day' | 'week' | 'month').
  * monthOffset is only used by the month view (0 = current month, ±N = other months).
  */
@@ -254,4 +302,4 @@ async function fetchAgenda(userDataDir, view = 'day', monthOffset = 0) {
   return { ...result, fetchedAt: new Date().toISOString() };
 }
 
-module.exports = { fetchAgenda };
+module.exports = { fetchAgenda, createEvent, updateEvent, deleteEvent };

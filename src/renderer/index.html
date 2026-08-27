@@ -35,6 +35,13 @@
               <rect x="8" y="8" width="5.5" height="5.5" rx="1" fill="currentColor" opacity="0.5"/>
             </svg>
           </button>
+          <button class="widget__iconBtn" id="notesBtn" title="메모장 열기">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M2 1.5h7.5L12 4v8a0.5 0.5 0 0 1-0.5 0.5h-9A0.5 0.5 0 0 1 2 12V1.5Z" stroke="currentColor" stroke-width="1.1" fill="none"/>
+              <path d="M9 1.5V4h3" stroke="currentColor" stroke-width="1.1" fill="none"/>
+              <path d="M4 7h5M4 9.2h5M4 11.4h3" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
+            </svg>
+          </button>
           <button class="widget__iconBtn" id="addEventBtn" title="Google 캘린더 열기">+</button>
           <button class="widget__iconBtn" id="refreshBtn" title="새로고침">⟳</button>
         </div>
@@ -49,8 +56,14 @@
 
       <footer class="widget__footer" id="footer"></footer>
     </div>
+
+    <div class="widget__contextMenu" id="eventContextMenu">
+      <button class="widget__contextMenuItem" id="editEventMenuItem">수정</button>
+      <button class="widget__contextMenuItem widget__contextMenuItem--danger" id="deleteEventMenuItem">삭제</button>
+    </div>
   </div>
 
+  <script src="../shared/confirmDialog.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

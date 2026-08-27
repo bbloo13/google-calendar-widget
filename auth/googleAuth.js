@@ -4,7 +4,11 @@ const http = require('http');
 const { URL } = require('url');
 const { OAuth2Client } = require('google-auth-library');
 
-const SCOPES = ['https://www.googleapis.com/auth/calendar.readonly'];
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar.readonly',
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/drive.file',
+];
 
 const CREDENTIALS_PATH = path.join(__dirname, '..', 'credentials.json');
 
@@ -97,19 +101,35 @@ function runLoopbackAuth(oAuth2Client) {
  * valid, refreshing it if expired, or running the interactive loopback flow
  * if no token exists yet.
  */
+function hasAllScopes(tokens) {
+  if (!tokens.scope) return true; // older token with no recorded scope — assume valid, let API calls fail loudly if not
+  const granted = tokens.scope.split(' ');
+  return SCOPES.every((s) => granted.includes(s));
+}
+
+// Cached across every IPC call in the process's lifetime — without this, each
+// button click paid for a fresh disk read + client rebuild before it could
+// even start the actual network request, which is most of why the notes
+// window felt sluggish.
+let cachedClient = null;
+let cachedUserDataDir = null;
+
 async function getAuthorizedClient(userDataDir) {
+  if (cachedClient && cachedUserDataDir === userDataDir) return cachedClient;
+
   const oAuth2Client = createOAuthClient();
   const tokenPath = getTokenPath(userDataDir);
 
-  if (fs.existsSync(tokenPath)) {
-    const tokens = JSON.parse(fs.readFileSync(tokenPath, 'utf-8'));
-    oAuth2Client.setCredentials(tokens);
-  } else {
-    const tokens = await runLoopbackAuth(oAuth2Client);
-    oAuth2Client.setCredentials(tokens);
+  let tokens = fs.existsSync(tokenPath) ? JSON.parse(fs.readFileSync(tokenPath, 'utf-8')) : null;
+
+  // A token saved before a new scope (e.g. Drive) was added won't carry it —
+  // re-run consent so the user only has to log in once per new scope added.
+  if (!tokens || !hasAllScopes(tokens)) {
+    tokens = await runLoopbackAuth(oAuth2Client);
     fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
     fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2), { mode: 0o600 });
   }
+  oAuth2Client.setCredentials(tokens);
 
   // Persist refreshed access tokens automatically.
   oAuth2Client.on('tokens', (tokens) => {

@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>메모장</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="notes" id="notes">
+    <div class="notes__titlebar">
+      <span class="notes__titlebarIcon">🗒️</span>
+      <span class="notes__titlebarText">메모장</span>
+      <input type="text" id="searchInput" class="notes__searchInput" placeholder="제목·본문 검색" />
+    </div>
+
+    <div class="notes__body">
+      <aside class="notes__sidebar">
+        <div class="notes__sidebarHeader">
+          <span>카테고리</span>
+          <button class="notes__iconBtn" id="addCategoryBtn" title="카테고리 추가">+</button>
+        </div>
+        <ul class="notes__categoryList" id="categoryList"></ul>
+        <button class="notes__driveLink" id="openDriveBtn">Google Drive에서 열기 ↗</button>
+      </aside>
+
+      <section class="notes__list">
+        <div class="notes__listHeader">
+          <span id="listTitle">카테고리를 선택하세요</span>
+          <button class="notes__iconBtn" id="addNoteBtn" title="새 메모" disabled>+</button>
+        </div>
+        <ul class="notes__noteList" id="noteList"></ul>
+      </section>
+
+      <section class="notes__editor">
+        <div class="notes__editorHeader">
+          <input class="notes__titleInput" id="titleInput" placeholder="메모 제목" disabled />
+          <div class="notes__editorBtns">
+            <span class="notes__saveState" id="saveState"></span>
+            <button class="notes__iconBtn" id="addToCalendarBtn" title="일정에 추가" disabled>📅</button>
+            <button class="notes__iconBtn notes__deleteBtn" id="deleteNoteBtn" title="메모 삭제" disabled>🗑</button>
+          </div>
+        </div>
+        <textarea class="notes__textarea" id="contentArea" placeholder="메모를 선택하거나 새로 만들어보세요" disabled></textarea>
+      </section>
+    </div>
+
+    <div class="notes__contextMenu" id="categoryContextMenu">
+      <button class="notes__contextMenuItem" id="addSubcategoryMenuItem">하위 카테고리 추가</button>
+      <button class="notes__contextMenuItem" id="renameCategoryMenuItem">이름 변경</button>
+      <button class="notes__contextMenuItem notes__contextMenuItem--danger" id="deleteCategoryMenuItem">삭제</button>
+    </div>
+
+    <div class="notes__overlay" id="calendarOverlay">
+      <div class="notes__calendarPopup">
+        <div class="notes__calendarPopupTitle">일정에 추가</div>
+        <label class="notes__field">
+          <span>제목</span>
+          <input type="text" id="eventTitleInput" />
+        </label>
+        <label class="notes__field">
+          <span>날짜</span>
+          <span class="notes__timeRange">
+            <input type="date" id="eventDateInput" />
+            <span>~</span>
+            <input type="date" id="eventEndDateInput" />
+          </span>
+        </label>
+        <label class="notes__field notes__checkboxField">
+          <input type="checkbox" id="eventAllDayInput" checked />
+          <span>종일</span>
+        </label>
+        <label class="notes__field" id="eventTimeField" style="display:none">
+          <span>시간</span>
+          <span class="notes__timeRange">
+            <input type="time" id="eventStartTimeInput" />
+            <span>~</span>
+            <input type="time" id="eventEndTimeInput" />
+          </span>
+        </label>
+        <div class="notes__calendarPopupBtns">
+          <button class="notes__popupBtn" id="cancelEventBtn">취소</button>
+          <button class="notes__popupBtn notes__popupBtn--primary" id="confirmEventBtn">추가</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../shared/confirmDialog.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

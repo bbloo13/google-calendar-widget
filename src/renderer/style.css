@@ -412,3 +412,116 @@ html, body {
   color: #52525f;
   text-align: right;
 }
+
+.widget__item-description {
+  cursor: text;
+}
+
+.widget__item-description-input {
+  width: 100%;
+  min-height: 48px;
+  resize: vertical;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(127, 181, 255, 0.3);
+  border-radius: 4px;
+  color: #e8e8ea;
+  font: inherit;
+  padding: 4px 6px;
+}
+
+.confirmDialog__overlay {
+  -webkit-app-region: no-drag;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 30;
+}
+
+.confirmDialog__box {
+  width: 240px;
+  background: #1c1c22;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.confirmDialog__message {
+  font-size: 12.5px;
+  color: #e8e8ea;
+  line-height: 1.5;
+  white-space: pre-line;
+}
+
+.confirmDialog__btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.confirmDialog__btn {
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #b8b8c4;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.confirmDialog__btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.confirmDialog__btn--danger {
+  background: #ff6b6b;
+  color: #14141a;
+  font-weight: 600;
+}
+
+.confirmDialog__btn--danger:hover {
+  background: #ff8585;
+}
+
+.widget__contextMenu {
+  -webkit-app-region: no-drag;
+  display: none;
+  position: fixed;
+  flex-direction: column;
+  background: #232329;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 100px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+
+.widget__contextMenu.is-visible {
+  display: flex;
+}
+
+.widget__contextMenuItem {
+  background: transparent;
+  border: none;
+  color: #e8e8ea;
+  text-align: left;
+  font-size: 12.5px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.widget__contextMenuItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.widget__contextMenuItem--danger:hover {
+  background: rgba(255, 100, 100, 0.14);
+  color: #ff8787;
+}

@@ -1,7 +1,15 @@
 const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { fetchAgenda } = require('./calendarService');
+const https = require('https');
+const { fetchAgenda, createEvent, updateEvent, deleteEvent } = require('./calendarService');
+const { getAuthorizedClient } = require('../auth/googleAuth');
+const drive = require('./driveService');
+
+// Without this, every single Calendar/Drive API call opened a brand-new TLS
+// connection before it could even start — reusing connections cuts a lot of
+// the per-click latency the notes window and widget were both feeling.
+https.globalAgent.keepAlive = true;
 
 const REFRESH_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
 const COLLAPSED_WIDTH = 300;
@@ -11,6 +19,7 @@ const EXPANDED_WIDTH = COLLAPSED_WIDTH + GRID_PANEL_WIDTH + PANEL_GAP;
 const WINDOW_HEIGHT = 420;
 
 let mainWindow;
+let notesWindow;
 let tray;
 let refreshTimer;
 let isQuitting = false;
@@ -104,6 +113,36 @@ function createWindow() {
   });
 }
 
+/** Opens the notes app window (a normal resizable window, unlike the calendar widget). */
+function openNotesWindow() {
+  if (notesWindow) {
+    notesWindow.show();
+    notesWindow.focus();
+    return;
+  }
+
+  notesWindow = new BrowserWindow({
+    width: 880,
+    height: 600,
+    minWidth: 640,
+    minHeight: 420,
+    title: '메모장',
+    backgroundColor: '#14141a',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: { color: '#1c1c22', symbolColor: '#b8b8c4', height: 40 },
+    webPreferences: {
+      preload: path.join(__dirname, 'notes-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+
+  notesWindow.loadFile(path.join(__dirname, 'notes', 'index.html'));
+  notesWindow.on('closed', () => {
+    notesWindow = null;
+  });
+}
+
 function createTrayIcon() {
   const size = 32;
   const buffer = Buffer.alloc(size * size * 4);
@@ -133,6 +172,7 @@ function createTray() {
 
   const menu = Menu.buildFromTemplate([
     { label: '위젯 표시', click: () => mainWindow && mainWindow.show() },
+    { label: '메모장 열기', click: () => openNotesWindow() },
     { type: 'separator' },
     {
       label: '완전 종료',
@@ -190,7 +230,204 @@ ipcMain.handle('open-calendar-home', (_event, dateKeyMs) => {
   shell.openExternal(url);
 });
 
+ipcMain.handle('open-notes-window', () => {
+  openNotesWindow();
+});
+
+ipcMain.handle('update-event', async (_event, { eventId, title, description }) => {
+  try {
+    const auth = await getAuthorizedClient(app.getPath('userData'));
+    const event = await updateEvent(auth, eventId, { title, description });
+    return { ok: true, event };
+  } catch (err) {
+    console.error('Failed to update event:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('delete-event', async (_event, eventId) => {
+  try {
+    const auth = await getAuthorizedClient(app.getPath('userData'));
+    await deleteEvent(auth, eventId);
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to delete event:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// --- Notes (Google Drive-backed) ---
+
+async function withGoogleAuth(fn) {
+  const auth = await getAuthorizedClient(app.getPath('userData'));
+  return fn(auth);
+}
+
+ipcMain.handle('notes:list-categories', async () => {
+  try {
+    const { categories } = await withGoogleAuth((auth) => drive.listCategories(auth));
+    return { ok: true, categories };
+  } catch (err) {
+    console.error('Failed to list note categories:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:create-category', async (_event, { name, parentId }) => {
+  try {
+    const category = await withGoogleAuth((auth) => drive.createCategory(auth, name, parentId));
+    return { ok: true, category };
+  } catch (err) {
+    console.error('Failed to create category:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:list-notes', async (_event, categoryId) => {
+  try {
+    const notes = await withGoogleAuth((auth) => drive.listNotes(auth, categoryId));
+    return { ok: true, notes };
+  } catch (err) {
+    console.error('Failed to list notes:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:read-note', async (_event, fileId) => {
+  try {
+    const note = await withGoogleAuth((auth) => drive.readNote(auth, fileId));
+    return { ok: true, note };
+  } catch (err) {
+    console.error('Failed to read note:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:create-note', async (_event, { categoryId, name, content }) => {
+  try {
+    const note = await withGoogleAuth((auth) => drive.createNote(auth, categoryId, name, content));
+    return { ok: true, note };
+  } catch (err) {
+    console.error('Failed to create note:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:update-note', async (_event, { fileId, content }) => {
+  try {
+    const note = await withGoogleAuth((auth) => drive.updateNote(auth, fileId, content));
+    return { ok: true, note };
+  } catch (err) {
+    console.error('Failed to save note:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:rename-note', async (_event, { fileId, name }) => {
+  try {
+    const note = await withGoogleAuth((auth) => drive.renameItem(auth, fileId, name));
+    return { ok: true, note };
+  } catch (err) {
+    console.error('Failed to rename note:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:rename-category', async (_event, { categoryId, name }) => {
+  try {
+    const category = await withGoogleAuth((auth) => drive.renameItem(auth, categoryId, name));
+    return { ok: true, category };
+  } catch (err) {
+    console.error('Failed to rename category:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:delete-note', async (_event, fileId) => {
+  try {
+    await withGoogleAuth((auth) => drive.trashFile(auth, fileId));
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to delete note:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:delete-category', async (_event, categoryId) => {
+  try {
+    await withGoogleAuth((auth) => drive.trashFile(auth, categoryId));
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to delete category:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:reorder-categories', async (_event, items) => {
+  try {
+    await withGoogleAuth((auth) => drive.reorderItems(auth, items));
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to reorder categories:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:reorder-notes', async (_event, items) => {
+  try {
+    await withGoogleAuth((auth) => drive.reorderItems(auth, items));
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to reorder notes:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:move-note', async (_event, { fileId, fromCategoryId, toCategoryId }) => {
+  try {
+    await withGoogleAuth((auth) => drive.moveNote(auth, fileId, fromCategoryId, toCategoryId));
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to move note:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:search', async (_event, term) => {
+  try {
+    const results = await withGoogleAuth((auth) => drive.searchNotes(auth, term));
+    return { ok: true, results };
+  } catch (err) {
+    console.error('Failed to search notes:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:add-to-calendar', async (_event, { title, date, endDate, time, endTime, description }) => {
+  try {
+    const event = await withGoogleAuth((auth) =>
+      createEvent(auth, { title, date, endDate, time, endTime, description })
+    );
+    return { ok: true, event };
+  } catch (err) {
+    console.error('Failed to add event to calendar:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:open-drive-folder', async () => {
+  try {
+    const url = await withGoogleAuth((auth) => drive.getRootFolderUrl(auth));
+    shell.openExternal(url);
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to open Drive folder:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   createWindow();
   createTray();
   startAutoRefresh();

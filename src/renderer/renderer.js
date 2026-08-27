@@ -5,6 +5,7 @@ const agendaEl = document.getElementById('agenda');
 const footerEl = document.getElementById('footer');
 const refreshBtn = document.getElementById('refreshBtn');
 const addEventBtn = document.getElementById('addEventBtn');
+const notesBtn = document.getElementById('notesBtn');
 const gridToggleBtn = document.getElementById('gridToggleBtn');
 const viewToggleEl = document.getElementById('viewToggle');
 const gridPanelEl = document.getElementById('gridPanel');
@@ -12,6 +13,10 @@ const monthLabelEl = document.getElementById('monthLabel');
 const monthWeeksEl = document.getElementById('monthWeeks');
 const prevMonthBtn = document.getElementById('prevMonthBtn');
 const nextMonthBtn = document.getElementById('nextMonthBtn');
+
+const eventContextMenu = document.getElementById('eventContextMenu');
+const editEventMenuItem = document.getElementById('editEventMenuItem');
+const deleteEventMenuItem = document.getElementById('deleteEventMenuItem');
 
 const WEEKDAYS_KO = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -22,6 +27,16 @@ let currentCells = [];
 let selectedCellKey = null; // set when a grid day is previewed in the agenda panel
 let lastRenderedGroups = null;
 let expandedEventKey = null; // id of the event whose detail panel is expanded, if any
+let contextMenuEventId = null;
+
+/** Finds an event object (and which group holds it) across the currently rendered groups. */
+function findEvent(id) {
+  for (const group of lastRenderedGroups || []) {
+    const ev = (group.events || []).find((e) => e.id === id);
+    if (ev) return { ev, group };
+  }
+  return null;
+}
 
 function renderDate() {
   const now = new Date();
@@ -63,6 +78,7 @@ function renderGroups(groups) {
       for (const ev of group.events) {
         const li = document.createElement('li');
         li.className = 'widget__item';
+        li.dataset.id = ev.id;
         if (ev.id === expandedEventKey) li.classList.add('is-expanded');
 
         const row = document.createElement('div');
@@ -83,6 +99,14 @@ function renderGroups(groups) {
           expandedEventKey = expandedEventKey === ev.id ? null : ev.id;
           renderGroups(lastRenderedGroups);
         });
+        // Public holiday entries come from Google's own calendar — not editable/deletable.
+        if (ev.source !== 'holiday') {
+          row.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openEventContextMenu(ev.id, e.clientX, e.clientY);
+          });
+        }
         li.appendChild(row);
 
         if (ev.id === expandedEventKey) {
@@ -99,6 +123,12 @@ function renderGroups(groups) {
           const desc = document.createElement('div');
           desc.className = 'widget__item-description';
           desc.textContent = ev.description || '추가 설명 없음';
+          if (ev.source !== 'holiday') {
+            desc.addEventListener('click', (e) => {
+              e.stopPropagation();
+              startEditDescription(ev.id);
+            });
+          }
           detail.appendChild(desc);
 
           li.appendChild(detail);
@@ -112,6 +142,116 @@ function renderGroups(groups) {
     agendaEl.appendChild(section);
   }
 }
+
+// --- Event context menu (rename / delete) + inline description edit ---
+
+function openEventContextMenu(id, x, y) {
+  contextMenuEventId = id;
+  eventContextMenu.style.left = `${x}px`;
+  eventContextMenu.style.top = `${y}px`;
+  eventContextMenu.classList.add('is-visible');
+}
+
+function closeEventContextMenu() {
+  eventContextMenu.classList.remove('is-visible');
+  contextMenuEventId = null;
+}
+
+document.addEventListener('click', (e) => {
+  if (!eventContextMenu.contains(e.target)) closeEventContextMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeEventContextMenu();
+});
+
+function startEditEventTitle(id) {
+  const found = findEvent(id);
+  const li = agendaEl.querySelector(`[data-id="${id}"]`);
+  if (!found || !li) return;
+  const titleEl = li.querySelector('.widget__item-title');
+  if (!titleEl) return;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = found.ev.title;
+  input.style.cssText = 'flex:1;min-width:0;background:rgba(255,255,255,0.08);border:1px solid rgba(127,181,255,0.4);border-radius:4px;color:#fff;font-size:13px;padding:1px 4px;';
+  titleEl.replaceWith(input);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = async (shouldSave) => {
+    if (done) return;
+    done = true;
+    const name = input.value.trim();
+    if (shouldSave && name && name !== found.ev.title) {
+      const res = await window.calendarAPI.updateEvent(id, name, undefined);
+      if (res.ok) found.ev.title = name;
+    }
+    renderGroups(lastRenderedGroups);
+  };
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') finish(true);
+    if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
+}
+
+function startEditDescription(id) {
+  const found = findEvent(id);
+  const li = agendaEl.querySelector(`[data-id="${id}"]`);
+  if (!found || !li) return;
+  const descEl = li.querySelector('.widget__item-description');
+  if (!descEl || descEl.tagName === 'TEXTAREA') return;
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'widget__item-description-input';
+  textarea.value = found.ev.description || '';
+  textarea.placeholder = '설명 입력...';
+  descEl.replaceWith(textarea);
+  textarea.focus();
+
+  let done = false;
+  const finish = async () => {
+    if (done) return;
+    done = true;
+    const description = textarea.value;
+    if (description !== (found.ev.description || '')) {
+      const res = await window.calendarAPI.updateEvent(id, undefined, description);
+      if (res.ok) found.ev.description = description;
+    }
+    renderGroups(lastRenderedGroups);
+  };
+
+  textarea.addEventListener('blur', finish);
+  textarea.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') finish();
+  });
+}
+
+async function deleteEventFlow(id) {
+  const found = findEvent(id);
+  if (!found) return;
+  if (!(await showConfirmDialog(`"${found.ev.title}" 일정을 삭제할까요?`))) return;
+  const res = await window.calendarAPI.deleteEvent(id);
+  if (!res.ok) return;
+  found.group.events = found.group.events.filter((e) => e.id !== id);
+  if (expandedEventKey === id) expandedEventKey = null;
+  renderGroups(lastRenderedGroups);
+}
+
+editEventMenuItem.addEventListener('click', () => {
+  const id = contextMenuEventId;
+  closeEventContextMenu();
+  if (id) startEditEventTitle(id);
+});
+
+deleteEventMenuItem.addEventListener('click', () => {
+  const id = contextMenuEventId;
+  closeEventContextMenu();
+  if (id) deleteEventFlow(id);
+});
 
 function renderFooter(timestamp, errorMessage) {
   if (errorMessage) {
@@ -252,6 +392,10 @@ refreshBtn.addEventListener('click', async () => {
 addEventBtn.addEventListener('click', () => {
   const dateKeyMs = selectedCellKey ? Number(selectedCellKey) : null;
   window.calendarAPI.openCalendarHome(dateKeyMs);
+});
+
+notesBtn.addEventListener('click', () => {
+  window.calendarAPI.openNotesWindow();
 });
 
 gridToggleBtn.addEventListener('click', async () => {
