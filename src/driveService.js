@@ -5,8 +5,12 @@ const ROOT_FOLDER_NAME = 'Calendar Widget 메모';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
 const NOTE_MIME = 'text/markdown';
 
+// The auth client is itself a cached singleton (see googleAuth.js), so the API
+// client wrapper built on top of it can be too — no need to rebuild it on every call.
+let cachedDrive = null;
 function driveClient(auth) {
-  return google.drive({ version: 'v3', auth });
+  if (!cachedDrive) cachedDrive = google.drive({ version: 'v3', auth });
+  return cachedDrive;
 }
 
 function textToStream(text) {

@@ -18,5 +18,5 @@ contextBridge.exposeInMainWorld('notesAPI', {
     ipcRenderer.invoke('notes:move-note', { fileId, fromCategoryId, toCategoryId }),
   search: (term) => ipcRenderer.invoke('notes:search', term),
   openDriveFolder: () => ipcRenderer.invoke('notes:open-drive-folder'),
-  addToCalendar: (payload) => ipcRenderer.invoke('notes:add-to-calendar', payload),
+  addEvent: (payload) => ipcRenderer.invoke('add-calendar-event', payload),
 });

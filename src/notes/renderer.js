@@ -13,17 +13,6 @@ const saveStateEl = document.getElementById('saveState');
 const deleteNoteBtn = document.getElementById('deleteNoteBtn');
 const addToCalendarBtn = document.getElementById('addToCalendarBtn');
 
-const calendarOverlay = document.getElementById('calendarOverlay');
-const eventTitleInput = document.getElementById('eventTitleInput');
-const eventDateInput = document.getElementById('eventDateInput');
-const eventEndDateInput = document.getElementById('eventEndDateInput');
-const eventAllDayInput = document.getElementById('eventAllDayInput');
-const eventTimeField = document.getElementById('eventTimeField');
-const eventStartTimeInput = document.getElementById('eventStartTimeInput');
-const eventEndTimeInput = document.getElementById('eventEndTimeInput');
-const cancelEventBtn = document.getElementById('cancelEventBtn');
-const confirmEventBtn = document.getElementById('confirmEventBtn');
-
 const categoryContextMenu = document.getElementById('categoryContextMenu');
 const addSubcategoryMenuItem = document.getElementById('addSubcategoryMenuItem');
 const renameCategoryMenuItem = document.getElementById('renameCategoryMenuItem');
@@ -726,64 +715,16 @@ deleteNoteBtn.addEventListener('click', () => {
 
 // --- Add-to-calendar popup ---
 
-function todayISO() {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-addToCalendarBtn.addEventListener('click', () => {
+addToCalendarBtn.addEventListener('click', async () => {
   if (!selectedNoteId) return;
-  eventTitleInput.value = titleInput.value.trim() || '제목 없음';
-  eventDateInput.value = todayISO();
-  eventEndDateInput.value = todayISO();
-  eventAllDayInput.checked = true;
-  eventTimeField.style.display = 'none';
-  eventStartTimeInput.value = '';
-  eventEndTimeInput.value = '';
-  calendarOverlay.classList.add('is-visible');
-  eventTitleInput.focus();
-});
+  const payload = await showAddEventPopup({
+    title: titleInput.value.trim() || '제목 없음',
+    description: contentArea.value,
+  });
+  if (!payload) return;
 
-// Keep the end date from landing before the start date.
-eventDateInput.addEventListener('change', () => {
-  eventEndDateInput.min = eventDateInput.value;
-  if (eventEndDateInput.value < eventDateInput.value) eventEndDateInput.value = eventDateInput.value;
-});
-
-eventAllDayInput.addEventListener('change', () => {
-  eventTimeField.style.display = eventAllDayInput.checked ? 'none' : 'flex';
-});
-
-function closeCalendarPopup() {
-  calendarOverlay.classList.remove('is-visible');
-}
-
-cancelEventBtn.addEventListener('click', closeCalendarPopup);
-calendarOverlay.addEventListener('click', (e) => {
-  if (e.target === calendarOverlay) closeCalendarPopup();
-});
-
-confirmEventBtn.addEventListener('click', async () => {
-  const title = eventTitleInput.value.trim() || '제목 없음';
-  const date = eventDateInput.value;
-  if (!date) return;
-  const endDate = eventEndDateInput.value >= date ? eventEndDateInput.value : date;
-
-  const payload = { title, date, endDate, description: contentArea.value };
-  if (!eventAllDayInput.checked) {
-    payload.time = eventStartTimeInput.value || '09:00';
-    payload.endTime = eventEndTimeInput.value || payload.time;
-  }
-
-  confirmEventBtn.disabled = true;
-  const res = await window.notesAPI.addToCalendar(payload);
-  confirmEventBtn.disabled = false;
-
+  const res = await window.notesAPI.addEvent(payload);
   if (res.ok) {
-    closeCalendarPopup();
     saveStateEl.textContent = '캘린더에 추가됨';
     setTimeout(() => {
       if (selectedNoteId) saveStateEl.textContent = `저장됨 ${formatTime(new Date().toISOString())}`;

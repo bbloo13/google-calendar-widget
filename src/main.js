@@ -403,11 +403,15 @@ ipcMain.handle('notes:search', async (_event, term) => {
   }
 });
 
-ipcMain.handle('notes:add-to-calendar', async (_event, { title, date, endDate, time, endTime, description }) => {
+// Shared by both windows — the widget's own "+" popup and the notes editor's
+// "일정에 추가" button both call this same channel.
+ipcMain.handle('add-calendar-event', async (_event, { title, date, endDate, time, endTime, description }) => {
   try {
     const event = await withGoogleAuth((auth) =>
       createEvent(auth, { title, date, endDate, time, endTime, description })
     );
+    // Whichever window made the change, keep the widget's own view in sync.
+    if (mainWindow) mainWindow.webContents.send('auto-refresh-tick');
     return { ok: true, event };
   } catch (err) {
     console.error('Failed to add event to calendar:', err);

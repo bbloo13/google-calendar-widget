@@ -5,6 +5,7 @@ const agendaEl = document.getElementById('agenda');
 const footerEl = document.getElementById('footer');
 const refreshBtn = document.getElementById('refreshBtn');
 const addEventBtn = document.getElementById('addEventBtn');
+const openCalendarWebBtn = document.getElementById('openCalendarWebBtn');
 const notesBtn = document.getElementById('notesBtn');
 const gridToggleBtn = document.getElementById('gridToggleBtn');
 const viewToggleEl = document.getElementById('viewToggle');
@@ -184,11 +185,16 @@ function startEditEventTitle(id) {
     if (done) return;
     done = true;
     const name = input.value.trim();
+    let changed = false;
     if (shouldSave && name && name !== found.ev.title) {
       const res = await window.calendarAPI.updateEvent(id, name, undefined);
-      if (res.ok) found.ev.title = name;
+      if (res.ok) {
+        found.ev.title = name;
+        changed = true;
+      }
     }
     renderGroups(lastRenderedGroups);
+    if (changed) await refreshAgenda(); // catches up the month grid too, not just this list
   };
 
   input.addEventListener('keydown', (e) => {
@@ -217,11 +223,16 @@ function startEditDescription(id) {
     if (done) return;
     done = true;
     const description = textarea.value;
+    let changed = false;
     if (description !== (found.ev.description || '')) {
       const res = await window.calendarAPI.updateEvent(id, undefined, description);
-      if (res.ok) found.ev.description = description;
+      if (res.ok) {
+        found.ev.description = description;
+        changed = true;
+      }
     }
     renderGroups(lastRenderedGroups);
+    if (changed) await refreshAgenda();
   };
 
   textarea.addEventListener('blur', finish);
@@ -239,6 +250,7 @@ async function deleteEventFlow(id) {
   found.group.events = found.group.events.filter((e) => e.id !== id);
   if (expandedEventKey === id) expandedEventKey = null;
   renderGroups(lastRenderedGroups);
+  await refreshAgenda();
 }
 
 editEventMenuItem.addEventListener('click', () => {
@@ -382,14 +394,35 @@ async function loadGrid(offset) {
   renderFooter(payload.agenda.fetchedAt, null);
 }
 
-refreshBtn.addEventListener('click', async () => {
-  refreshBtn.classList.add('spinning');
+/**
+ * Re-fetches whatever's currently on screen (list, and the grid too if it's
+ * open). Used by the manual refresh button, the 20-minute auto-refresh timer,
+ * and after any edit the widget itself makes (rename/delete/description) —
+ * a local DOM patch alone wouldn't reach the month grid's bars/dots.
+ */
+async function refreshAgenda() {
   await loadList(currentView);
   if (gridOpen) await loadGrid(monthOffset);
+}
+
+refreshBtn.addEventListener('click', async () => {
+  refreshBtn.classList.add('spinning');
+  await refreshAgenda();
   setTimeout(() => refreshBtn.classList.remove('spinning'), 400);
 });
 
-addEventBtn.addEventListener('click', () => {
+addEventBtn.addEventListener('click', async () => {
+  const payload = await showAddEventPopup({});
+  if (!payload) return;
+  const res = await window.calendarAPI.addEvent(payload);
+  if (res.ok) {
+    await refreshAgenda();
+  } else {
+    alert(`일정 추가 실패: ${res.error}`);
+  }
+});
+
+openCalendarWebBtn.addEventListener('click', () => {
   const dateKeyMs = selectedCellKey ? Number(selectedCellKey) : null;
   window.calendarAPI.openCalendarHome(dateKeyMs);
 });
@@ -441,13 +474,20 @@ nextMonthBtn.addEventListener('click', () => {
   loadGrid(monthOffset);
 });
 
-window.calendarAPI.onAutoRefreshTick(async () => {
-  await loadList(currentView);
-  if (gridOpen) await loadGrid(monthOffset);
-});
+window.calendarAPI.onAutoRefreshTick(refreshAgenda);
 
 renderDate();
 loadList(currentView);
 
-// Keep the date/weekday fresh across midnight without a full reload.
-setInterval(renderDate, 60 * 1000);
+// Keep the date/weekday fresh, and re-fetch the agenda once the day actually
+// rolls over — otherwise "오늘/내일" (or the week's day-of-week grouping) kept
+// showing the previous day's data until the next 20-minute auto-refresh.
+let lastDateKey = new Date().toDateString();
+setInterval(() => {
+  renderDate();
+  const nowKey = new Date().toDateString();
+  if (nowKey !== lastDateKey) {
+    lastDateKey = nowKey;
+    refreshAgenda();
+  }
+}, 60 * 1000);

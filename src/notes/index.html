@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <title>메모장</title>
+  <link rel="stylesheet" href="../shared/shared.css" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -50,42 +51,10 @@
       <button class="notes__contextMenuItem notes__contextMenuItem--danger" id="deleteCategoryMenuItem">삭제</button>
     </div>
 
-    <div class="notes__overlay" id="calendarOverlay">
-      <div class="notes__calendarPopup">
-        <div class="notes__calendarPopupTitle">일정에 추가</div>
-        <label class="notes__field">
-          <span>제목</span>
-          <input type="text" id="eventTitleInput" />
-        </label>
-        <label class="notes__field">
-          <span>날짜</span>
-          <span class="notes__timeRange">
-            <input type="date" id="eventDateInput" />
-            <span>~</span>
-            <input type="date" id="eventEndDateInput" />
-          </span>
-        </label>
-        <label class="notes__field notes__checkboxField">
-          <input type="checkbox" id="eventAllDayInput" checked />
-          <span>종일</span>
-        </label>
-        <label class="notes__field" id="eventTimeField" style="display:none">
-          <span>시간</span>
-          <span class="notes__timeRange">
-            <input type="time" id="eventStartTimeInput" />
-            <span>~</span>
-            <input type="time" id="eventEndTimeInput" />
-          </span>
-        </label>
-        <div class="notes__calendarPopupBtns">
-          <button class="notes__popupBtn" id="cancelEventBtn">취소</button>
-          <button class="notes__popupBtn notes__popupBtn--primary" id="confirmEventBtn">추가</button>
-        </div>
-      </div>
-    </div>
   </div>
 
   <script src="../shared/confirmDialog.js"></script>
+  <script src="../shared/eventPopup.js"></script>
   <script src="renderer.js"></script>
 </body>
 </html>

@@ -7,6 +7,19 @@ const PRIMARY_COLOR = '#7fb5ff';
 const HOLIDAY_COLOR = '#3aa76d';
 const DAY_MS = 86400000;
 
+// The auth client is itself a cached singleton (see googleAuth.js), so the API
+// client wrapper built on top of it can be too — no need to rebuild it on every call.
+let cachedCalendar = null;
+function calendarClient(auth) {
+  if (!cachedCalendar) cachedCalendar = google.calendar({ version: 'v3', auth });
+  return cachedCalendar;
+}
+
+// Public holidays never change for a date range once published, so cache each
+// query window instead of re-fetching it on every single view load/switch.
+const HOLIDAY_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+const holidayCache = new Map(); // key: `${timeMin}|${timeMax}` -> { items, cachedAt }
+
 function startOfDay(date) {
   const d = new Date(date);
   d.setHours(0, 0, 0, 0);
@@ -79,6 +92,8 @@ function formatEvent(ev, source) {
   };
 }
 
+const EVENT_LIST_FIELDS = 'items(id,summary,description,location,start,end)';
+
 async function listCalendarEvents(calendarApi, calendarId, timeMin, timeMax) {
   const res = await calendarApi.events.list({
     calendarId,
@@ -87,19 +102,32 @@ async function listCalendarEvents(calendarApi, calendarId, timeMin, timeMax) {
     singleEvents: true,
     orderBy: 'startTime',
     maxResults: 250,
+    fields: EVENT_LIST_FIELDS, // skip attendees/reminders/etc. we never use — smaller payload, faster parse
   });
   return res.data.items || [];
 }
 
+async function listHolidayEvents(calendar, timeMin, timeMax) {
+  const key = `${timeMin.toISOString()}|${timeMax.toISOString()}`;
+  const cached = holidayCache.get(key);
+  if (cached && Date.now() - cached.cachedAt < HOLIDAY_CACHE_TTL_MS) return cached.items;
+
+  try {
+    const items = await listCalendarEvents(calendar, HOLIDAY_CALENDAR_ID, timeMin, timeMax);
+    holidayCache.set(key, { items, cachedAt: Date.now() });
+    return items;
+  } catch (err) {
+    console.error('Failed to fetch holiday calendar:', err.message);
+    return cached ? cached.items : []; // serve stale data over nothing if a refetch fails
+  }
+}
+
 /** Fetches events from the user's primary calendar plus the KR public holiday calendar. */
 async function listEvents(auth, timeMin, timeMax) {
-  const calendar = google.calendar({ version: 'v3', auth });
+  const calendar = calendarClient(auth);
   const [primaryItems, holidayItems] = await Promise.all([
     listCalendarEvents(calendar, 'primary', timeMin, timeMax),
-    listCalendarEvents(calendar, HOLIDAY_CALENDAR_ID, timeMin, timeMax).catch((err) => {
-      console.error('Failed to fetch holiday calendar:', err.message);
-      return [];
-    }),
+    listHolidayEvents(calendar, timeMin, timeMax),
   ]);
   return [
     ...primaryItems.map((ev) => formatEvent(ev, 'primary')),
@@ -245,7 +273,7 @@ async function fetchMonthView(auth, monthOffset = 0) {
  * ('HH:MM') are optional — omitting them creates an all-day event.
  */
 async function createEvent(auth, { title, date, endDate, time, endTime, description }) {
-  const calendar = google.calendar({ version: 'v3', auth });
+  const calendar = calendarClient(auth);
   const finalEndDate = endDate && endDate >= date ? endDate : date;
 
   let start;
@@ -274,7 +302,7 @@ async function createEvent(auth, { title, date, endDate, time, endTime, descript
 
 /** Patches only the given fields (title and/or description) of an existing primary-calendar event. */
 async function updateEvent(auth, eventId, { title, description }) {
-  const calendar = google.calendar({ version: 'v3', auth });
+  const calendar = calendarClient(auth);
   const resource = {};
   if (title !== undefined) resource.summary = title;
   if (description !== undefined) resource.description = description;
@@ -283,7 +311,7 @@ async function updateEvent(auth, eventId, { title, description }) {
 }
 
 async function deleteEvent(auth, eventId) {
-  const calendar = google.calendar({ version: 'v3', auth });
+  const calendar = calendarClient(auth);
   await calendar.events.delete({ calendarId: 'primary', eventId });
 }
 

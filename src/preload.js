@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('calendarAPI', {
   openNotesWindow: () => ipcRenderer.invoke('open-notes-window'),
   updateEvent: (eventId, title, description) => ipcRenderer.invoke('update-event', { eventId, title, description }),
   deleteEvent: (eventId) => ipcRenderer.invoke('delete-event', eventId),
+  addEvent: (payload) => ipcRenderer.invoke('add-calendar-event', payload),
   onAutoRefreshTick: (callback) => {
     ipcRenderer.on('auto-refresh-tick', () => callback());
   },
