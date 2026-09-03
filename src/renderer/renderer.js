@@ -39,6 +39,56 @@ function findEvent(id) {
   return null;
 }
 
+// Google Calendar's own web editor stores event descriptions as a small HTML
+// subset (links, bold, line breaks, lists) — showing that as plain text is
+// where the escaped tags/entities the user saw came from. Rebuilding through
+// an allowlist (rather than trusting innerHTML) keeps this safe even though
+// the source is the user's own calendar data.
+const DESCRIPTION_ALLOWED_TAGS = { A: 'a', B: 'b', STRONG: 'b', I: 'i', EM: 'i', U: 'u', BR: 'br', UL: 'ul', OL: 'ol', LI: 'li' };
+
+function appendSanitizedChildren(sourceNode, targetParent) {
+  for (const child of Array.from(sourceNode.childNodes)) {
+    if (child.nodeType === Node.TEXT_NODE) {
+      targetParent.appendChild(document.createTextNode(child.textContent));
+      continue;
+    }
+    if (child.nodeType !== Node.ELEMENT_NODE) continue;
+
+    const mapped = DESCRIPTION_ALLOWED_TAGS[child.tagName];
+    if (!mapped) {
+      appendSanitizedChildren(child, targetParent); // unwrap: drop the tag, keep its content
+      continue;
+    }
+    const clean = document.createElement(mapped);
+    if (mapped === 'a') {
+      const href = child.getAttribute('href') || '';
+      if (/^https?:\/\//i.test(href)) clean.dataset.href = href;
+    }
+    appendSanitizedChildren(child, clean);
+    targetParent.appendChild(clean);
+  }
+}
+
+/** Renders an event description's limited HTML safely, with links opened via the OS browser. */
+function renderEventDescription(container, raw) {
+  container.innerHTML = '';
+  if (!raw) {
+    container.textContent = '추가 설명 없음';
+    return;
+  }
+  const parsed = new DOMParser().parseFromString(raw, 'text/html');
+  appendSanitizedChildren(parsed.body, container);
+  container.querySelectorAll('a').forEach((a) => {
+    const href = a.dataset.href;
+    if (!href) return;
+    a.href = href; // cursor/tooltip only — click is intercepted below, it never navigates the widget itself
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      window.calendarAPI.openExternalUrl(href);
+    });
+  });
+}
+
 function renderDate() {
   const now = new Date();
   weekdayEl.textContent = `${WEEKDAYS_KO[now.getDay()]}요일`;
@@ -123,10 +173,11 @@ function renderGroups(groups) {
 
           const desc = document.createElement('div');
           desc.className = 'widget__item-description';
-          desc.textContent = ev.description || '추가 설명 없음';
+          renderEventDescription(desc, ev.description);
           if (ev.source !== 'holiday') {
             desc.addEventListener('click', (e) => {
               e.stopPropagation();
+              if (e.target.closest('a')) return; // let the link handler above deal with it
               startEditDescription(ev.id);
             });
           }
@@ -191,6 +242,8 @@ function startEditEventTitle(id) {
       if (res.ok) {
         found.ev.title = name;
         changed = true;
+      } else {
+        alert(`제목 수정 실패: ${res.error}`);
       }
     }
     renderGroups(lastRenderedGroups);
@@ -229,6 +282,8 @@ function startEditDescription(id) {
       if (res.ok) {
         found.ev.description = description;
         changed = true;
+      } else {
+        alert(`설명 수정 실패: ${res.error}`);
       }
     }
     renderGroups(lastRenderedGroups);

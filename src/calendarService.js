@@ -1,5 +1,5 @@
 const { google } = require('googleapis');
-const { getAuthorizedClient } = require('../auth/googleAuth');
+const { withAuthRetry } = require('../auth/googleAuth');
 
 const WEEKDAYS_KO = ['일', '월', '화', '수', '목', '금', '토'];
 const HOLIDAY_CALENDAR_ID = 'ko.south_korea#holiday@group.v.calendar.google.com';
@@ -7,11 +7,16 @@ const PRIMARY_COLOR = '#7fb5ff';
 const HOLIDAY_COLOR = '#3aa76d';
 const DAY_MS = 86400000;
 
-// The auth client is itself a cached singleton (see googleAuth.js), so the API
-// client wrapper built on top of it can be too — no need to rebuild it on every call.
+// The client wrapper is cached too, but keyed to the specific auth object it
+// was built from — after a dead-token self-heal (see withAuthRetry) a fresh
+// auth object shows up and this rebuilds instead of reusing the old dead one.
 let cachedCalendar = null;
+let cachedCalendarAuth = null;
 function calendarClient(auth) {
-  if (!cachedCalendar) cachedCalendar = google.calendar({ version: 'v3', auth });
+  if (!cachedCalendar || cachedCalendarAuth !== auth) {
+    cachedCalendar = google.calendar({ version: 'v3', auth });
+    cachedCalendarAuth = auth;
+  }
   return cachedCalendar;
 }
 
@@ -320,12 +325,11 @@ async function deleteEvent(auth, eventId) {
  * monthOffset is only used by the month view (0 = current month, ±N = other months).
  */
 async function fetchAgenda(userDataDir, view = 'day', monthOffset = 0) {
-  const auth = await getAuthorizedClient(userDataDir);
-
-  let result;
-  if (view === 'week') result = await fetchWeekView(auth);
-  else if (view === 'month') result = await fetchMonthView(auth, monthOffset);
-  else result = await fetchDayView(auth);
+  const result = await withAuthRetry(userDataDir, (auth) => {
+    if (view === 'week') return fetchWeekView(auth);
+    if (view === 'month') return fetchMonthView(auth, monthOffset);
+    return fetchDayView(auth);
+  });
 
   return { ...result, fetchedAt: new Date().toISOString() };
 }

@@ -143,4 +143,41 @@ async function getAuthorizedClient(userDataDir) {
   return oAuth2Client;
 }
 
-module.exports = { getAuthorizedClient, SCOPES };
+function isInvalidGrantError(err) {
+  return err?.response?.data?.error === 'invalid_grant' || /invalid_grant/i.test(String(err?.message || ''));
+}
+
+/** Drops the cached client and the on-disk token so the next getAuthorizedClient() call starts fresh. */
+function clearAuthCache(userDataDir) {
+  if (cachedUserDataDir === userDataDir) {
+    cachedClient = null;
+    cachedUserDataDir = null;
+  }
+  try {
+    const tokenPath = getTokenPath(userDataDir);
+    if (fs.existsSync(tokenPath)) fs.unlinkSync(tokenPath);
+  } catch (err) {
+    console.error('Failed to clear stale token:', err);
+  }
+}
+
+/**
+ * Runs `fn(auth)`; if the refresh token has died with `invalid_grant` —
+ * expected roughly every 7 days while this app's OAuth consent screen stays
+ * in "Testing" mode (avoiding Google's verification process for sensitive
+ * scopes) — clears the dead token, signs in again once, and retries.
+ */
+async function withAuthRetry(userDataDir, fn) {
+  const auth = await getAuthorizedClient(userDataDir);
+  try {
+    return await fn(auth);
+  } catch (err) {
+    if (!isInvalidGrantError(err)) throw err;
+    console.warn('Refresh token expired or was revoked — signing in again...');
+    clearAuthCache(userDataDir);
+    const freshAuth = await getAuthorizedClient(userDataDir);
+    return fn(freshAuth);
+  }
+}
+
+module.exports = { getAuthorizedClient, withAuthRetry, SCOPES };

@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const { fetchAgenda, createEvent, updateEvent, deleteEvent } = require('./calendarService');
-const { getAuthorizedClient } = require('../auth/googleAuth');
+const { withAuthRetry } = require('../auth/googleAuth');
 const drive = require('./driveService');
 
 // Without this, every single Calendar/Drive API call opened a brand-new TLS
@@ -230,14 +230,18 @@ ipcMain.handle('open-calendar-home', (_event, dateKeyMs) => {
   shell.openExternal(url);
 });
 
+// Links inside an event's (HTML) description get opened this way, never navigated to in-window.
+ipcMain.handle('open-external-url', (_event, url) => {
+  if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+});
+
 ipcMain.handle('open-notes-window', () => {
   openNotesWindow();
 });
 
 ipcMain.handle('update-event', async (_event, { eventId, title, description }) => {
   try {
-    const auth = await getAuthorizedClient(app.getPath('userData'));
-    const event = await updateEvent(auth, eventId, { title, description });
+    const event = await withGoogleAuth((auth) => updateEvent(auth, eventId, { title, description }));
     return { ok: true, event };
   } catch (err) {
     console.error('Failed to update event:', err);
@@ -247,8 +251,7 @@ ipcMain.handle('update-event', async (_event, { eventId, title, description }) =
 
 ipcMain.handle('delete-event', async (_event, eventId) => {
   try {
-    const auth = await getAuthorizedClient(app.getPath('userData'));
-    await deleteEvent(auth, eventId);
+    await withGoogleAuth((auth) => deleteEvent(auth, eventId));
     return { ok: true };
   } catch (err) {
     console.error('Failed to delete event:', err);
@@ -259,8 +262,7 @@ ipcMain.handle('delete-event', async (_event, eventId) => {
 // --- Notes (Google Drive-backed) ---
 
 async function withGoogleAuth(fn) {
-  const auth = await getAuthorizedClient(app.getPath('userData'));
-  return fn(auth);
+  return withAuthRetry(app.getPath('userData'), fn);
 }
 
 ipcMain.handle('notes:list-categories', async () => {

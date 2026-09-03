@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('calendarAPI', {
   updateEvent: (eventId, title, description) => ipcRenderer.invoke('update-event', { eventId, title, description }),
   deleteEvent: (eventId) => ipcRenderer.invoke('delete-event', eventId),
   addEvent: (payload) => ipcRenderer.invoke('add-calendar-event', payload),
+  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   onAutoRefreshTick: (callback) => {
     ipcRenderer.on('auto-refresh-tick', () => callback());
   },

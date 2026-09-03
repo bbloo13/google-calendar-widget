@@ -441,6 +441,21 @@ html, body {
   cursor: text;
 }
 
+.widget__item-description a {
+  color: #7fb5ff;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.widget__item-description ul,
+.widget__item-description ol {
+  padding-left: 18px;
+}
+
 .widget__item-description-input {
   width: 100%;
   min-height: 48px;
