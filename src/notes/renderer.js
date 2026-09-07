@@ -1,5 +1,6 @@
 const categoryProgressBar = createProgressBar(document.getElementById('categoryProgressBar'));
 const noteProgressBar = createProgressBar(document.getElementById('noteProgressBar'));
+const editorProgressBar = createProgressBar(document.getElementById('editorProgressBar'));
 
 const searchInput = document.getElementById('searchInput');
 const categoryListEl = document.getElementById('categoryList');
@@ -614,9 +615,14 @@ async function selectNote(id) {
   // Stale-while-revalidate, same idea as category lists: paint instantly if
   // we've opened this note before this session, then confirm/update for real.
   const cached = noteContentCache.get(id);
-  if (cached) paintNote(cached);
+  if (cached) {
+    paintNote(cached);
+  } else {
+    editorProgressBar.start(); // only for an actual first-time wait — a cached repaint needs no bar
+  }
 
   const res = await window.notesAPI.readNote(id);
+  if (!cached) editorProgressBar.finish();
   if (!res.ok) return;
   if (selectedNoteId !== id) return; // user already opened a different note by the time this resolved
   noteContentCache.set(id, res.note);
