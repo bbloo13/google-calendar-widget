@@ -1,3 +1,6 @@
+const categoryProgressBar = createProgressBar(document.getElementById('categoryProgressBar'));
+const noteProgressBar = createProgressBar(document.getElementById('noteProgressBar'));
+
 const searchInput = document.getElementById('searchInput');
 const categoryListEl = document.getElementById('categoryList');
 const addCategoryBtn = document.getElementById('addCategoryBtn');
@@ -35,6 +38,12 @@ let draggedCategoryId = null;
 let draggedCategoryParentId = null;
 
 const ROOT_PARENT_KEY = '__root__';
+
+// Stale-while-revalidate caches, keyed by category/note id — painted instantly
+// on a repeat visit within the same session, always reconciled by a real
+// fetch right after (see selectCategory/loadNotes and selectNote below).
+const notesCache = new Map(); // categoryId -> notes array
+const noteContentCache = new Map(); // noteId -> { id, name, content, modifiedTime }
 
 /** Recursively finds a category node anywhere in the tree. */
 function findCategory(id, list = categories) {
@@ -408,7 +417,9 @@ deleteCategoryMenuItem.addEventListener('click', async () => {
 });
 
 async function loadCategories() {
+  categoryProgressBar.start();
   const res = await window.notesAPI.listCategories();
+  categoryProgressBar.finish();
   if (!res.ok) return;
   categories = res.categories;
   renderCategories();
@@ -423,8 +434,19 @@ async function selectCategory(id) {
   addNoteBtn.disabled = false;
   const cat = findCategory(id);
   listTitleEl.textContent = cat ? cat.name : '-';
-  noteListEl.innerHTML = '<li style="color:#52525f;font-size:12.5px;padding:8px;">불러오는 중...</li>';
-  await loadNotes(id);
+
+  // Stale-while-revalidate: a category visited earlier this session paints
+  // instantly from its last known list while a fresh fetch quietly confirms
+  // it in the background — the real fetch below always still runs and wins.
+  const cached = notesCache.get(id);
+  if (cached) {
+    notes = cached;
+    renderNotes();
+  } else {
+    noteListEl.innerHTML = '';
+    noteProgressBar.start(); // only for an actual first-time wait — a cached repaint needs no bar
+  }
+  await loadNotes(id, !cached);
 }
 
 function startAddCategory() {
@@ -543,6 +565,7 @@ async function handleNoteDroppedOnCategory(noteId, fromCategoryId, toCategoryId)
   if (!res.ok) return;
 
   notes = notes.filter((n) => n.id !== noteId);
+  notesCache.set(fromCategoryId, notes);
   renderNotes();
   if (selectedNoteId === noteId) clearEditor();
 
@@ -553,10 +576,13 @@ async function handleNoteDroppedOnCategory(noteId, fromCategoryId, toCategoryId)
   renderCategories();
 }
 
-async function loadNotes(categoryId) {
+async function loadNotes(categoryId, showProgress) {
   const res = await window.notesAPI.listNotes(categoryId);
+  if (showProgress) noteProgressBar.finish();
   if (!res.ok) return;
+  if (selectedCategoryId !== categoryId) return; // user already moved to a different category
   notes = res.notes;
+  notesCache.set(categoryId, notes);
   renderNotes();
 }
 
@@ -571,18 +597,30 @@ function clearEditor() {
   saveStateEl.textContent = '';
 }
 
-async function selectNote(id) {
-  selectedNoteId = id;
-  renderNotes();
-  const res = await window.notesAPI.readNote(id);
-  if (!res.ok) return;
-  titleInput.value = res.note.name.replace(/\.md$/i, '');
-  contentArea.value = res.note.content;
+function paintNote(note) {
+  titleInput.value = note.name.replace(/\.md$/i, '');
+  contentArea.value = note.content;
   titleInput.disabled = false;
   contentArea.disabled = false;
   deleteNoteBtn.disabled = false;
   addToCalendarBtn.disabled = false;
-  saveStateEl.textContent = `저장됨 ${formatTime(res.note.modifiedTime)}`;
+  saveStateEl.textContent = `저장됨 ${formatTime(note.modifiedTime)}`;
+}
+
+async function selectNote(id) {
+  selectedNoteId = id;
+  renderNotes();
+
+  // Stale-while-revalidate, same idea as category lists: paint instantly if
+  // we've opened this note before this session, then confirm/update for real.
+  const cached = noteContentCache.get(id);
+  if (cached) paintNote(cached);
+
+  const res = await window.notesAPI.readNote(id);
+  if (!res.ok) return;
+  if (selectedNoteId !== id) return; // user already opened a different note by the time this resolved
+  noteContentCache.set(id, res.note);
+  paintNote(res.note);
 }
 
 function startAddNote() {
@@ -626,21 +664,28 @@ addNoteBtn.addEventListener('click', startAddNote);
 
 // --- Editor: autosave content, rename on title change ---
 
+const SAVE_DEBOUNCE_MS = 400; // was 800 — halves the pause-before-save-starts delay
+
 contentArea.addEventListener('input', () => {
   if (!selectedNoteId) return;
+  const noteId = selectedNoteId;
   saveStateEl.textContent = '입력 중...';
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
     saveStateEl.textContent = '저장 중...';
-    const res = await window.notesAPI.updateNote(selectedNoteId, contentArea.value);
+    const content = contentArea.value;
+    const res = await window.notesAPI.updateNote(noteId, content);
+    if (selectedNoteId !== noteId) return; // moved to a different note while this save was in flight
     if (res.ok) {
-      const note = notes.find((n) => n.id === selectedNoteId);
+      const note = notes.find((n) => n.id === noteId);
       if (note) note.modifiedTime = res.note.modifiedTime;
+      const cached = noteContentCache.get(noteId);
+      if (cached) noteContentCache.set(noteId, { ...cached, content, modifiedTime: res.note.modifiedTime });
       saveStateEl.textContent = `저장됨 ${formatTime(res.note.modifiedTime)}`;
     } else {
       saveStateEl.textContent = '저장 실패';
     }
-  }, 800);
+  }, SAVE_DEBOUNCE_MS);
 });
 
 titleInput.addEventListener('blur', async () => {
@@ -701,6 +746,8 @@ async function deleteNoteFlow(id) {
   const res = await window.notesAPI.deleteNote(id);
   if (!res.ok) return;
   notes = notes.filter((n) => n.id !== id);
+  notesCache.set(selectedCategoryId, notes);
+  noteContentCache.delete(id);
   const cat = findCategory(selectedCategoryId);
   if (cat) cat.noteCount = Math.max(0, cat.noteCount - 1);
   renderCategories();

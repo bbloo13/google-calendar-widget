@@ -1,5 +1,23 @@
-/* Styles for the shared confirmDialog.js and eventPopup.js components,
-   used by both the widget and notes windows. */
+/* Styles for the shared confirmDialog.js, eventPopup.js, and progressBar.js
+   components, used by both the widget and notes windows. */
+
+/* A fixed-height track sits right where content is about to appear (e.g. just
+   under a list's header) so the fill bar inside it reads as "loading here,"
+   not as a peripheral strip easy to miss at the window's outer edge. */
+.progressBarTrack {
+  height: 3px;
+  background: transparent;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+.progressBar {
+  height: 100%;
+  width: 0%;
+  background: #7fb5ff;
+  box-shadow: 0 0 6px rgba(127, 181, 255, 0.6);
+  opacity: 0;
+}
 
 .confirmDialog__overlay {
   -webkit-app-region: no-drag; /* needed inside the widget's draggable window; harmless elsewhere */

@@ -437,6 +437,13 @@ app.whenReady().then(() => {
   createWindow();
   createTray();
   startAutoRefresh();
+
+  // Quietly warm the notes backend (root-folder lookup + an authorized
+  // client) in the background so opening the notes window for the first
+  // time doesn't pay for that from a cold start — it races harmlessly
+  // against the widget's own startup fetch (see the promise-caching note
+  // on getAuthorizedClient) and just gets ignored if it fails.
+  withGoogleAuth((auth) => drive.listCategories(auth)).catch(() => {});
 });
 
 app.on('window-all-closed', () => {

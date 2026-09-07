@@ -110,37 +110,48 @@ function hasAllScopes(tokens) {
 // Cached across every IPC call in the process's lifetime — without this, each
 // button click paid for a fresh disk read + client rebuild before it could
 // even start the actual network request, which is most of why the notes
-// window felt sluggish.
-let cachedClient = null;
+// window felt sluggish. Caching the in-flight *promise* (not just the
+// resolved client) also means two calls landing at once — e.g. the widget's
+// own startup fetch racing a background notes prefetch — await the same
+// login attempt instead of each opening its own browser tab.
+let cachedClientPromise = null;
 let cachedUserDataDir = null;
 
-async function getAuthorizedClient(userDataDir) {
-  if (cachedClient && cachedUserDataDir === userDataDir) return cachedClient;
+function getAuthorizedClient(userDataDir) {
+  if (cachedClientPromise && cachedUserDataDir === userDataDir) return cachedClientPromise;
 
-  const oAuth2Client = createOAuthClient();
-  const tokenPath = getTokenPath(userDataDir);
+  cachedUserDataDir = userDataDir;
+  cachedClientPromise = (async () => {
+    const oAuth2Client = createOAuthClient();
+    const tokenPath = getTokenPath(userDataDir);
 
-  let tokens = fs.existsSync(tokenPath) ? JSON.parse(fs.readFileSync(tokenPath, 'utf-8')) : null;
+    let tokens = fs.existsSync(tokenPath) ? JSON.parse(fs.readFileSync(tokenPath, 'utf-8')) : null;
 
-  // A token saved before a new scope (e.g. Drive) was added won't carry it —
-  // re-run consent so the user only has to log in once per new scope added.
-  if (!tokens || !hasAllScopes(tokens)) {
-    tokens = await runLoopbackAuth(oAuth2Client);
-    fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
-    fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2), { mode: 0o600 });
-  }
-  oAuth2Client.setCredentials(tokens);
+    // A token saved before a new scope (e.g. Drive) was added won't carry it —
+    // re-run consent so the user only has to log in once per new scope added.
+    if (!tokens || !hasAllScopes(tokens)) {
+      tokens = await runLoopbackAuth(oAuth2Client);
+      fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+      fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+    }
+    oAuth2Client.setCredentials(tokens);
 
-  // Persist refreshed access tokens automatically.
-  oAuth2Client.on('tokens', (tokens) => {
-    const existing = fs.existsSync(tokenPath)
-      ? JSON.parse(fs.readFileSync(tokenPath, 'utf-8'))
-      : {};
-    const merged = { ...existing, ...tokens };
-    fs.writeFileSync(tokenPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    // Persist refreshed access tokens automatically.
+    oAuth2Client.on('tokens', (tokens) => {
+      const existing = fs.existsSync(tokenPath)
+        ? JSON.parse(fs.readFileSync(tokenPath, 'utf-8'))
+        : {};
+      const merged = { ...existing, ...tokens };
+      fs.writeFileSync(tokenPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
+    });
+
+    return oAuth2Client;
+  })().catch((err) => {
+    cachedClientPromise = null; // let a failed attempt (e.g. login cancelled) be retried
+    throw err;
   });
 
-  return oAuth2Client;
+  return cachedClientPromise;
 }
 
 function isInvalidGrantError(err) {
@@ -150,7 +161,7 @@ function isInvalidGrantError(err) {
 /** Drops the cached client and the on-disk token so the next getAuthorizedClient() call starts fresh. */
 function clearAuthCache(userDataDir) {
   if (cachedUserDataDir === userDataDir) {
-    cachedClient = null;
+    cachedClientPromise = null;
     cachedUserDataDir = null;
   }
   try {
