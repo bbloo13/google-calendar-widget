@@ -39,12 +39,13 @@
           <input class="notes__titleInput" id="titleInput" placeholder="메모 제목" disabled />
           <div class="notes__editorBtns">
             <span class="notes__saveState" id="saveState"></span>
+            <button class="notes__iconBtn notes__strikeBtn" id="strikeBtn" title="현재 줄 취소선" disabled><s>S</s></button>
             <button class="notes__iconBtn" id="addToCalendarBtn" title="일정에 추가" disabled>📅</button>
             <button class="notes__iconBtn notes__deleteBtn" id="deleteNoteBtn" title="메모 삭제" disabled>🗑</button>
           </div>
         </div>
         <div class="progressBarTrack"><div class="progressBar" id="editorProgressBar"></div></div>
-        <textarea class="notes__textarea" id="contentArea" placeholder="메모를 선택하거나 새로 만들어보세요" disabled></textarea>
+        <div class="notes__textarea" id="contentArea" contenteditable="false" data-placeholder="메모를 선택하거나 새로 만들어보세요"></div>
       </section>
     </div>
 

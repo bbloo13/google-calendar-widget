@@ -277,7 +277,8 @@ html, body {
 
 .notes__textarea {
   flex: 1;
-  resize: none;
+  min-height: 0;
+  overflow-y: auto;
   background: transparent;
   border: none;
   outline: none;
@@ -285,10 +286,38 @@ html, body {
   font-size: 14px;
   line-height: 1.6;
   font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
-.notes__textarea::placeholder {
+.notes__textarea:empty::before {
+  content: attr(data-placeholder);
   color: #52525f;
+}
+
+.notes__textarea[contenteditable="false"] {
+  cursor: default;
+}
+
+/* One line = one block child, so pressing Enter and the strikethrough toggle
+   below can each target "the current line" unambiguously. */
+.notes__textarea > div {
+  min-height: 1.6em;
+}
+
+.notes__textarea .note-line--struck {
+  text-decoration: line-through;
+  color: #6f6f83;
+}
+
+.notes__strikeBtn s {
+  text-decoration: line-through;
+  font-style: normal;
+}
+
+.notes__strikeBtn.is-active {
+  color: #7fb5ff;
+  background: rgba(127, 181, 255, 0.14);
 }
 
 .notes__categoryItem.is-dragging,

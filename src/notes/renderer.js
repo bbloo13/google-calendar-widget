@@ -14,6 +14,7 @@ const addNoteBtn = document.getElementById('addNoteBtn');
 const titleInput = document.getElementById('titleInput');
 const contentArea = document.getElementById('contentArea');
 const saveStateEl = document.getElementById('saveState');
+const strikeBtn = document.getElementById('strikeBtn');
 const deleteNoteBtn = document.getElementById('deleteNoteBtn');
 const addToCalendarBtn = document.getElementById('addToCalendarBtn');
 
@@ -587,12 +588,49 @@ async function loadNotes(categoryId, showProgress) {
   renderNotes();
 }
 
+// The editor stores/loads plain markdown (so the .md file stays portable —
+// openable in Drive's preview, Obsidian, etc.) but *edits* as one <div> per
+// line inside a contenteditable, so a struck-through line actually renders
+// struck through instead of showing raw `~~` markers.
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function markdownToEditorHTML(content) {
+  const lines = content.length ? content.split('\n') : [''];
+  return lines
+    .map((line) => {
+      const struck = line.match(/^~~(.*)~~$/);
+      const text = struck ? struck[1] : line;
+      const cls = struck ? ' note-line note-line--struck' : ' note-line';
+      return `<div class="${cls.trim()}">${escapeHtml(text) || '<br>'}</div>`;
+    })
+    .join('');
+}
+
+function editorHTMLToMarkdown() {
+  const lines = [];
+  for (const child of contentArea.childNodes) {
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const text = child.textContent;
+      lines.push(child.classList.contains('note-line--struck') ? `~~${text}~~` : text);
+    } else if (child.nodeType === Node.TEXT_NODE) {
+      lines.push(child.textContent); // stray text before the first Enter creates a line div
+    }
+  }
+  return lines.join('\n');
+}
+
 function clearEditor() {
   selectedNoteId = null;
   titleInput.value = '';
-  contentArea.value = '';
+  contentArea.innerHTML = '';
   titleInput.disabled = true;
-  contentArea.disabled = true;
+  contentArea.contentEditable = 'false';
+  strikeBtn.disabled = true;
   deleteNoteBtn.disabled = true;
   addToCalendarBtn.disabled = true;
   saveStateEl.textContent = '';
@@ -600,13 +638,46 @@ function clearEditor() {
 
 function paintNote(note) {
   titleInput.value = note.name.replace(/\.md$/i, '');
-  contentArea.value = note.content;
+  contentArea.innerHTML = markdownToEditorHTML(note.content);
   titleInput.disabled = false;
-  contentArea.disabled = false;
+  contentArea.contentEditable = 'true';
+  strikeBtn.disabled = false;
   deleteNoteBtn.disabled = false;
   addToCalendarBtn.disabled = false;
   saveStateEl.textContent = `저장됨 ${formatTime(note.modifiedTime)}`;
 }
+
+/** Walks up from the selection to the direct line-<div> it's in (a child of contentArea). */
+function getCurrentLine() {
+  const sel = document.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  let node = sel.getRangeAt(0).startContainer;
+  while (node && node !== contentArea) {
+    if (node.parentElement === contentArea) return node;
+    node = node.parentNode;
+  }
+  return null;
+}
+
+function updateStrikeBtnState() {
+  const line = getCurrentLine();
+  strikeBtn.classList.toggle('is-active', !!(line && line.classList && line.classList.contains('note-line--struck')));
+}
+
+contentArea.addEventListener('click', updateStrikeBtnState);
+contentArea.addEventListener('keyup', updateStrikeBtnState);
+
+// mousedown (not click) + preventDefault keeps focus/selection in contentArea
+// instead of losing the cursor position to the button, the standard trick
+// toolbar buttons over a contenteditable region use.
+strikeBtn.addEventListener('mousedown', (e) => e.preventDefault());
+strikeBtn.addEventListener('click', () => {
+  const line = getCurrentLine();
+  if (!line) return;
+  line.classList.toggle('note-line--struck');
+  updateStrikeBtnState();
+  contentArea.dispatchEvent(new Event('input', { bubbles: true }));
+});
 
 async function selectNote(id) {
   selectedNoteId = id;
@@ -679,7 +750,7 @@ contentArea.addEventListener('input', () => {
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(async () => {
     saveStateEl.textContent = '저장 중...';
-    const content = contentArea.value;
+    const content = editorHTMLToMarkdown();
     const res = await window.notesAPI.updateNote(noteId, content);
     if (selectedNoteId !== noteId) return; // moved to a different note while this save was in flight
     if (res.ok) {
@@ -772,7 +843,7 @@ addToCalendarBtn.addEventListener('click', async () => {
   if (!selectedNoteId) return;
   const payload = await showAddEventPopup({
     title: titleInput.value.trim() || '제목 없음',
-    description: contentArea.value,
+    description: editorHTMLToMarkdown(),
   });
   if (!payload) return;
 
