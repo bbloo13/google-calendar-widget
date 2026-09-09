@@ -320,6 +320,81 @@ html, body {
   background: rgba(127, 181, 255, 0.14);
 }
 
+.notes__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.notes__attachments:empty {
+  display: none;
+}
+
+.notes__attachment {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #b8b8c4;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  max-width: 200px;
+}
+
+.notes__attachment:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.notes__attachmentIcon {
+  flex: 0 0 auto;
+  display: inline-block;
+  font-size: 13px;
+}
+
+.notes__attachment.is-downloading .notes__attachmentIcon {
+  animation: notes-attachment-spin 0.8s linear infinite;
+}
+
+@keyframes notes-attachment-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.notes__attachmentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes__attachmentRemove {
+  flex: 0 0 auto;
+  opacity: 0;
+  color: #6f6f83;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 3px;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.notes__attachment:hover .notes__attachmentRemove {
+  opacity: 1;
+}
+
+.notes__attachmentRemove:hover {
+  color: #ff8787;
+  background: rgba(255, 100, 100, 0.14);
+}
+
+.notes__editor.is-dragover {
+  outline: 1px dashed #7fb5ff;
+  outline-offset: -4px;
+}
+
 .notes__categoryItem.is-dragging,
 .notes__noteItem.is-dragging {
   opacity: 0.35;

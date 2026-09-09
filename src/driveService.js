@@ -86,7 +86,7 @@ async function listCategories(auth) {
   // trip per category — this was the main thing making the window feel slow.
   const parentClauses = allFolders.map((f) => `'${f.id}' in parents`).join(' or ');
   const notesRes = await drive.files.list({
-    q: `(${parentClauses}) and mimeType!='${FOLDER_MIME}' and trashed=false`,
+    q: `(${parentClauses}) and mimeType='${NOTE_MIME}' and trashed=false`,
     fields: 'files(id,parents)',
     spaces: 'drive',
     pageSize: 1000,
@@ -120,7 +120,7 @@ async function listCategories(auth) {
 async function listNotes(auth, categoryId) {
   const drive = driveClient(auth);
   const res = await drive.files.list({
-    q: `'${categoryId}' in parents and mimeType!='${FOLDER_MIME}' and trashed=false`,
+    q: `'${categoryId}' in parents and mimeType='${NOTE_MIME}' and trashed=false`,
     fields: 'files(id,name,modifiedTime,appProperties)',
     spaces: 'drive',
   });
@@ -217,7 +217,7 @@ async function searchNotes(auth, term) {
   const drive = driveClient(auth);
   const escaped = term.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
   const res = await drive.files.list({
-    q: `fullText contains '${escaped}' and mimeType!='${FOLDER_MIME}' and trashed=false`,
+    q: `fullText contains '${escaped}' and mimeType='${NOTE_MIME}' and trashed=false`,
     fields: 'files(id,name,modifiedTime,parents)',
     orderBy: 'modifiedTime desc',
     spaces: 'drive',
@@ -229,6 +229,54 @@ async function searchNotes(auth, term) {
 async function getRootFolderUrl(auth) {
   const rootId = await ensureRootFolder(auth);
   return `https://drive.google.com/drive/folders/${rootId}`;
+}
+
+// Attachments (images and any other file dropped/pasted into a note) are tagged
+// with the owning note's file id via appProperties, not matched by file name —
+// two notes can share a title (Drive doesn't enforce uniqueness), but file ids
+// never collide, so this stays correct regardless of what the file is named.
+const ATTACHMENT_NOTE_PROPERTY = 'noteId';
+
+/** Uploads a file into a note's category folder, tagged so it can be found by note id regardless of its own name. */
+async function uploadAttachment(auth, { categoryId, noteId, name, mimeType, buffer }) {
+  const drive = driveClient(auth);
+  const created = await drive.files.create({
+    resource: {
+      name,
+      parents: [categoryId],
+      appProperties: { [ATTACHMENT_NOTE_PROPERTY]: noteId },
+    },
+    media: { mimeType, body: Readable.from([buffer]) },
+    fields: 'id,name,mimeType,size',
+  });
+  return created.data;
+}
+
+/** Lists every file tagged as belonging to a note — matched by the appProperties tag, never by file name. */
+async function listAttachments(auth, noteId) {
+  const drive = driveClient(auth);
+  const res = await drive.files.list({
+    q: `appProperties has { key='${ATTACHMENT_NOTE_PROPERTY}' and value='${noteId}' } and trashed=false`,
+    fields: 'files(id,name,mimeType,size)',
+    spaces: 'drive',
+  });
+  return res.data.files || [];
+}
+
+/** Fetches one attachment's name + binary content, for saving to a local file. */
+async function downloadAttachment(auth, fileId) {
+  const drive = driveClient(auth);
+  const [meta, content] = await Promise.all([
+    drive.files.get({ fileId, fields: 'id,name' }),
+    drive.files.get({ fileId, alt: 'media' }, { responseType: 'arraybuffer' }),
+  ]);
+  return { name: meta.data.name, buffer: Buffer.from(content.data) };
+}
+
+/** Trashes every attachment tagged to a note — called when the note itself is deleted, so orphans don't pile up. */
+async function deleteAttachmentsForNote(auth, noteId) {
+  const attachments = await listAttachments(auth, noteId);
+  await Promise.all(attachments.map((a) => trashFile(auth, a.id)));
 }
 
 module.exports = {
@@ -244,4 +292,8 @@ module.exports = {
   moveNote,
   searchNotes,
   getRootFolderUrl,
+  uploadAttachment,
+  listAttachments,
+  downloadAttachment,
+  deleteAttachmentsForNote,
 };

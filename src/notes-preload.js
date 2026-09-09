@@ -19,4 +19,9 @@ contextBridge.exposeInMainWorld('notesAPI', {
   search: (term) => ipcRenderer.invoke('notes:search', term),
   openDriveFolder: () => ipcRenderer.invoke('notes:open-drive-folder'),
   addEvent: (payload) => ipcRenderer.invoke('add-calendar-event', payload),
+  listAttachments: (noteId) => ipcRenderer.invoke('notes:list-attachments', noteId),
+  uploadAttachment: (payload) => ipcRenderer.invoke('notes:upload-attachment', payload),
+  downloadAttachment: (fileId) => ipcRenderer.invoke('notes:download-attachment', fileId),
+  previewAttachment: (fileId) => ipcRenderer.invoke('notes:preview-attachment', fileId),
+  deleteAttachment: (fileId) => ipcRenderer.invoke('notes:delete-attachment', fileId),
 });

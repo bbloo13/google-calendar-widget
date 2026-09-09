@@ -17,6 +17,8 @@ const saveStateEl = document.getElementById('saveState');
 const strikeBtn = document.getElementById('strikeBtn');
 const deleteNoteBtn = document.getElementById('deleteNoteBtn');
 const addToCalendarBtn = document.getElementById('addToCalendarBtn');
+const attachmentsListEl = document.getElementById('attachmentsList');
+const editorPane = document.querySelector('.notes__editor');
 
 const categoryContextMenu = document.getElementById('categoryContextMenu');
 const addSubcategoryMenuItem = document.getElementById('addSubcategoryMenuItem');
@@ -30,6 +32,7 @@ let selectedNoteId = null;
 let saveTimeout = null;
 let contextMenuTarget = null; // { type: 'category' | 'note', id }
 let expandedCategoryIds = new Set();
+let currentAttachments = []; // files attached to the currently-open note
 
 // Drag-and-drop state: a note carries its source category so a drop on a
 // different category moves it; a category also carries its parent so reorder
@@ -77,6 +80,12 @@ function expandAncestors(id, list = categories, path = []) {
     if (expandAncestors(id, cat.children || [], [...path, cat.id])) return true;
   }
   return false;
+}
+
+// The Drive file keeps its real ".md" extension (so it stays recognizable as
+// markdown in Drive preview, Obsidian, etc.) — this only hides it in the UI.
+function displayName(name) {
+  return name.replace(/\.md$/i, '');
 }
 
 function formatTime(iso) {
@@ -508,7 +517,7 @@ function renderNotes() {
 
     const title = document.createElement('div');
     title.className = 'notes__noteTitle';
-    title.textContent = note.name;
+    title.textContent = displayName(note.name);
     const meta = document.createElement('div');
     meta.className = 'notes__noteMeta';
     meta.textContent = formatTime(note.modifiedTime);
@@ -634,10 +643,12 @@ function clearEditor() {
   deleteNoteBtn.disabled = true;
   addToCalendarBtn.disabled = true;
   saveStateEl.textContent = '';
+  currentAttachments = [];
+  attachmentsListEl.innerHTML = '';
 }
 
 function paintNote(note) {
-  titleInput.value = note.name.replace(/\.md$/i, '');
+  titleInput.value = displayName(note.name);
   contentArea.innerHTML = markdownToEditorHTML(note.content);
   titleInput.disabled = false;
   contentArea.contentEditable = 'true';
@@ -682,6 +693,8 @@ strikeBtn.addEventListener('click', () => {
 async function selectNote(id) {
   selectedNoteId = id;
   renderNotes();
+  currentAttachments = [];
+  attachmentsListEl.innerHTML = '';
 
   // Stale-while-revalidate, same idea as category lists: paint instantly if
   // we've opened this note before this session, then confirm/update for real.
@@ -698,7 +711,210 @@ async function selectNote(id) {
   if (selectedNoteId !== id) return; // user already opened a different note by the time this resolved
   noteContentCache.set(id, res.note);
   paintNote(res.note);
+
+  loadAttachments(id);
 }
+
+// --- Attachments: any file dropped or pasted into a note. Tagged by note id
+// (see driveService.uploadAttachment), not by file name, so duplicate note
+// titles or later renames never break the link.
+
+async function loadAttachments(noteId) {
+  const res = await window.notesAPI.listAttachments(noteId);
+  if (!res.ok) return;
+  if (selectedNoteId !== noteId) return; // user already moved to a different note
+  currentAttachments = res.attachments;
+  renderAttachments();
+}
+
+function isImageAttachment(att) {
+  return !!(att.mimeType && att.mimeType.startsWith('image/'));
+}
+
+function attachmentIcon(mimeType) {
+  return mimeType && mimeType.startsWith('image/') ? '🖼️' : '📎';
+}
+
+function renderAttachments() {
+  attachmentsListEl.innerHTML = '';
+  for (const att of currentAttachments) {
+    const chip = document.createElement('div');
+    chip.className = 'notes__attachment';
+    chip.title = att.name;
+
+    const icon = document.createElement('span');
+    icon.className = 'notes__attachmentIcon';
+    icon.textContent = attachmentIcon(att.mimeType);
+
+    const name = document.createElement('span');
+    name.className = 'notes__attachmentName';
+    name.textContent = att.name;
+
+    const remove = document.createElement('span');
+    remove.className = 'notes__attachmentRemove';
+    remove.textContent = '×';
+    remove.title = '첨부파일 삭제';
+    remove.addEventListener('click', (e) => {
+      e.stopPropagation(); // don't also trigger the chip's own download
+      removeAttachmentFlow(att.id, chip);
+    });
+
+    chip.appendChild(icon);
+    chip.appendChild(name);
+    chip.appendChild(remove);
+    chip.addEventListener('click', (e) => {
+      if (isImageAttachment(att)) {
+        e.stopPropagation();
+        showAttachmentChoice(att, chip, icon);
+      } else {
+        downloadAttachmentFlow(att, chip, icon);
+      }
+    });
+    attachmentsListEl.appendChild(chip);
+  }
+}
+
+// A tiny "미리보기 / 다운로드" menu for images only — everything else has just
+// one sensible action (download), so it skips straight to that on click.
+let openAttachmentMenu = null;
+
+function closeAttachmentMenu() {
+  if (openAttachmentMenu) {
+    openAttachmentMenu.remove();
+    openAttachmentMenu = null;
+  }
+}
+
+function showAttachmentChoice(att, chip, icon) {
+  closeAttachmentMenu();
+  const rect = chip.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'notes__contextMenu is-visible';
+  menu.style.left = `${rect.left}px`;
+  menu.style.top = `${rect.bottom + 4}px`;
+
+  const previewBtn = document.createElement('button');
+  previewBtn.className = 'notes__contextMenuItem';
+  previewBtn.textContent = '미리보기';
+  previewBtn.addEventListener('click', async () => {
+    closeAttachmentMenu();
+    chip.classList.add('is-downloading');
+    const res = await window.notesAPI.previewAttachment(att.id);
+    chip.classList.remove('is-downloading');
+    if (!res.ok) alert(`미리보기 실패: ${res.error}`);
+  });
+
+  const downloadBtn = document.createElement('button');
+  downloadBtn.className = 'notes__contextMenuItem';
+  downloadBtn.textContent = '다운로드';
+  downloadBtn.addEventListener('click', () => {
+    closeAttachmentMenu();
+    downloadAttachmentFlow(att, chip, icon);
+  });
+
+  menu.appendChild(previewBtn);
+  menu.appendChild(downloadBtn);
+  document.body.appendChild(menu);
+  openAttachmentMenu = menu;
+}
+
+document.addEventListener('click', (e) => {
+  if (openAttachmentMenu && !openAttachmentMenu.contains(e.target)) closeAttachmentMenu();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeAttachmentMenu();
+});
+
+async function removeAttachmentFlow(fileId, chip) {
+  chip.classList.add('is-downloading'); // reuse the spinner while the delete is in flight
+  const res = await window.notesAPI.deleteAttachment(fileId);
+  if (!res.ok) {
+    chip.classList.remove('is-downloading');
+    alert(`삭제 실패: ${res.error}`);
+    return;
+  }
+  currentAttachments = currentAttachments.filter((a) => a.id !== fileId);
+  renderAttachments();
+}
+
+/** Click-to-receive: no save-location prompt, just drops straight into the Downloads folder like a browser download. */
+async function downloadAttachmentFlow(att, chip, icon) {
+  if (chip.classList.contains('is-downloading')) return;
+  chip.classList.add('is-downloading');
+  const res = await window.notesAPI.downloadAttachment(att.id);
+  chip.classList.remove('is-downloading');
+  icon.textContent = res.ok ? '✅' : '⚠️';
+  setTimeout(() => {
+    icon.textContent = attachmentIcon(att.mimeType);
+  }, 1200);
+  if (!res.ok) alert(`다운로드 실패: ${res.error}`);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadAttachmentFile(file, name) {
+  if (!selectedNoteId || !selectedCategoryId) return;
+  const noteId = selectedNoteId;
+  const data = await fileToBase64(file);
+  const res = await window.notesAPI.uploadAttachment({
+    categoryId: selectedCategoryId,
+    noteId,
+    name,
+    mimeType: file.type || 'application/octet-stream',
+    data,
+  });
+  if (selectedNoteId !== noteId) return; // moved to a different note while this was uploading
+  if (res.ok) {
+    currentAttachments.push(res.attachment);
+    renderAttachments();
+  } else {
+    alert(`첨부파일 업로드 실패: ${res.error}`);
+  }
+}
+
+// Drag-and-drop: real files keep their own name ("그대로 저장") — only a
+// clipboard-pasted image (which has no file name of its own) gets one made
+// up from the note's title.
+['dragenter', 'dragover'].forEach((evt) => {
+  editorPane.addEventListener(evt, (e) => {
+    if (!selectedNoteId || !e.dataTransfer || !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    editorPane.classList.add('is-dragover');
+  });
+});
+
+editorPane.addEventListener('dragleave', (e) => {
+  if (e.target === editorPane) editorPane.classList.remove('is-dragover');
+});
+
+editorPane.addEventListener('drop', async (e) => {
+  editorPane.classList.remove('is-dragover');
+  if (!selectedNoteId || !e.dataTransfer || e.dataTransfer.files.length === 0) return;
+  e.preventDefault();
+  for (const file of e.dataTransfer.files) {
+    await uploadAttachmentFile(file, file.name);
+  }
+});
+
+contentArea.addEventListener('paste', (e) => {
+  if (!selectedNoteId || !e.clipboardData) return;
+  const imageItem = [...e.clipboardData.items].find((item) => item.type.startsWith('image/'));
+  if (!imageItem) return; // not an image — let normal text paste proceed
+  e.preventDefault();
+  const file = imageItem.getAsFile();
+  if (!file) return;
+  const ext = imageItem.type.split('/')[1] || 'png';
+  const title = titleInput.value.trim() || '제목 없음';
+  const index = currentAttachments.length + 1;
+  uploadAttachmentFile(file, `${title} (${index}).${ext}`);
+});
 
 function startAddNote() {
   if (!selectedCategoryId) return;
@@ -789,7 +1005,7 @@ function startRenameNote(id) {
   li.innerHTML = '';
   const input = document.createElement('input');
   input.type = 'text';
-  input.value = note.name.replace(/\.md$/i, '');
+  input.value = displayName(note.name);
   input.style.cssText = 'width:100%;background:transparent;border:none;outline:none;color:#fff;font-size:13px;';
   li.appendChild(input);
   input.focus();
@@ -895,7 +1111,7 @@ function renderSearchResults(term, results) {
 
     const title = document.createElement('div');
     title.className = 'notes__noteTitle';
-    title.textContent = note.name;
+    title.textContent = displayName(note.name);
 
     const catId = note.parents && note.parents[0];
     const cat = findCategory(catId);

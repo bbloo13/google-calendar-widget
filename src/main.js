@@ -46,6 +46,27 @@ function savePosition(bounds) {
   }
 }
 
+/** A Downloads-folder path for `name` that won't clobber an existing file (matches how browsers auto-number repeat downloads). */
+function uniqueDownloadPath(name) {
+  const downloadsDir = app.getPath('downloads');
+  const ext = path.extname(name);
+  const base = path.basename(name, ext);
+  let candidate = path.join(downloadsDir, name);
+  let i = 1;
+  while (fs.existsSync(candidate)) {
+    candidate = path.join(downloadsDir, `${base} (${i})${ext}`);
+    i += 1;
+  }
+  return candidate;
+}
+
+/** A scratch path (per file id, so two different attachments never collide) for opening an attachment in its OS default viewer without touching Downloads. */
+function previewTempPath(fileId, name) {
+  const dir = path.join(app.getPath('temp'), 'calendar-widget-previews', fileId);
+  fs.mkdirSync(dir, { recursive: true });
+  return path.join(dir, name);
+}
+
 function defaultPosition() {
   const { workArea } = screen.getPrimaryDisplay();
   const margin = 24;
@@ -347,10 +368,72 @@ ipcMain.handle('notes:rename-category', async (_event, { categoryId, name }) => 
 
 ipcMain.handle('notes:delete-note', async (_event, fileId) => {
   try {
-    await withGoogleAuth((auth) => drive.trashFile(auth, fileId));
+    await withGoogleAuth(async (auth) => {
+      await drive.trashFile(auth, fileId);
+      await drive.deleteAttachmentsForNote(auth, fileId); // no orphaned images/files left behind
+    });
     return { ok: true };
   } catch (err) {
     console.error('Failed to delete note:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:list-attachments', async (_event, noteId) => {
+  try {
+    const attachments = await withGoogleAuth((auth) => drive.listAttachments(auth, noteId));
+    return { ok: true, attachments };
+  } catch (err) {
+    console.error('Failed to list attachments:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:upload-attachment', async (_event, { categoryId, noteId, name, mimeType, data }) => {
+  try {
+    const buffer = Buffer.from(data, 'base64');
+    const attachment = await withGoogleAuth((auth) =>
+      drive.uploadAttachment(auth, { categoryId, noteId, name, mimeType, buffer })
+    );
+    return { ok: true, attachment };
+  } catch (err) {
+    console.error('Failed to upload attachment:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:download-attachment', async (_event, fileId) => {
+  try {
+    const { name, buffer } = await withGoogleAuth((auth) => drive.downloadAttachment(auth, fileId));
+    const savePath = uniqueDownloadPath(name);
+    fs.writeFileSync(savePath, buffer);
+    return { ok: true, path: savePath };
+  } catch (err) {
+    console.error('Failed to download attachment:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:preview-attachment', async (_event, fileId) => {
+  try {
+    const { name, buffer } = await withGoogleAuth((auth) => drive.downloadAttachment(auth, fileId));
+    const tempPath = previewTempPath(fileId, name);
+    fs.writeFileSync(tempPath, buffer);
+    const openError = await shell.openPath(tempPath);
+    if (openError) throw new Error(openError);
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to preview attachment:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:delete-attachment', async (_event, fileId) => {
+  try {
+    await withGoogleAuth((auth) => drive.trashFile(auth, fileId));
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to delete attachment:', err);
     return { ok: false, error: err.message };
   }
 });
