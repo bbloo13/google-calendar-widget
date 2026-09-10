@@ -49,6 +49,7 @@ const ROOT_PARENT_KEY = '__root__';
 // fetch right after (see selectCategory/loadNotes and selectNote below).
 const notesCache = new Map(); // categoryId -> notes array
 const noteContentCache = new Map(); // noteId -> { id, name, content, modifiedTime }
+const attachmentsCache = new Map(); // noteId -> attachments array
 
 /** Recursively finds a category node anywhere in the tree. */
 function findCategory(id, list = categories) {
@@ -697,35 +698,44 @@ async function selectNote(id) {
   attachmentsListEl.innerHTML = '';
 
   // Stale-while-revalidate, same idea as category lists: paint instantly if
-  // we've opened this note before this session, then confirm/update for real.
-  const cached = noteContentCache.get(id);
-  if (cached) {
-    paintNote(cached);
-  } else {
-    editorProgressBar.start(); // only for an actual first-time wait — a cached repaint needs no bar
+  // we've opened this note (and its attachments) before this session, then
+  // confirm/update for real. The progress bar only shows when something is
+  // actually missing from cache — otherwise the still-running real fetch
+  // below would make a fully-cached repaint flash a bar for no reason.
+  const cachedContent = noteContentCache.get(id);
+  const cachedAttachments = attachmentsCache.get(id);
+  if (cachedContent) paintNote(cachedContent);
+  if (cachedAttachments) {
+    currentAttachments = cachedAttachments;
+    renderAttachments();
   }
+  const bothCached = !!cachedContent && !!cachedAttachments;
+  if (!bothCached) editorProgressBar.start();
 
-  const res = await window.notesAPI.readNote(id);
-  if (!cached) editorProgressBar.finish();
-  if (!res.ok) return;
+  // Fetched together (not content-then-attachments) so the progress bar
+  // covers both — otherwise attachments would visibly pop in late, after the
+  // bar already said "done".
+  const [noteRes, attachmentsRes] = await Promise.all([
+    window.notesAPI.readNote(id),
+    window.notesAPI.listAttachments(id),
+  ]);
+  if (!bothCached) editorProgressBar.finish();
   if (selectedNoteId !== id) return; // user already opened a different note by the time this resolved
-  noteContentCache.set(id, res.note);
-  paintNote(res.note);
 
-  loadAttachments(id);
+  if (noteRes.ok) {
+    noteContentCache.set(id, noteRes.note);
+    paintNote(noteRes.note);
+  }
+  if (attachmentsRes.ok) {
+    currentAttachments = attachmentsRes.attachments;
+    attachmentsCache.set(id, attachmentsRes.attachments);
+    renderAttachments();
+  }
 }
 
 // --- Attachments: any file dropped or pasted into a note. Tagged by note id
 // (see driveService.uploadAttachment), not by file name, so duplicate note
 // titles or later renames never break the link.
-
-async function loadAttachments(noteId) {
-  const res = await window.notesAPI.listAttachments(noteId);
-  if (!res.ok) return;
-  if (selectedNoteId !== noteId) return; // user already moved to a different note
-  currentAttachments = res.attachments;
-  renderAttachments();
-}
 
 function isImageAttachment(att) {
   return !!(att.mimeType && att.mimeType.startsWith('image/'));
@@ -826,6 +836,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 async function removeAttachmentFlow(fileId, chip) {
+  const noteId = selectedNoteId;
   chip.classList.add('is-downloading'); // reuse the spinner while the delete is in flight
   const res = await window.notesAPI.deleteAttachment(fileId);
   if (!res.ok) {
@@ -833,7 +844,9 @@ async function removeAttachmentFlow(fileId, chip) {
     alert(`삭제 실패: ${res.error}`);
     return;
   }
+  if (selectedNoteId !== noteId) return; // moved to a different note while this was deleting
   currentAttachments = currentAttachments.filter((a) => a.id !== fileId);
+  attachmentsCache.set(noteId, currentAttachments);
   renderAttachments();
 }
 
@@ -873,6 +886,7 @@ async function uploadAttachmentFile(file, name) {
   if (selectedNoteId !== noteId) return; // moved to a different note while this was uploading
   if (res.ok) {
     currentAttachments.push(res.attachment);
+    attachmentsCache.set(noteId, currentAttachments);
     renderAttachments();
   } else {
     alert(`첨부파일 업로드 실패: ${res.error}`);
@@ -1041,6 +1055,7 @@ async function deleteNoteFlow(id) {
   notes = notes.filter((n) => n.id !== id);
   notesCache.set(selectedCategoryId, notes);
   noteContentCache.delete(id);
+  attachmentsCache.delete(id);
   const cat = findCategory(selectedCategoryId);
   if (cat) cat.noteCount = Math.max(0, cat.noteCount - 1);
   renderCategories();
