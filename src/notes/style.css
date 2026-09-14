@@ -415,14 +415,17 @@ html, body {
   background: rgba(127, 181, 255, 0.1);
 }
 
-/* Category re-parent drag: which half of the row the cursor is over decides
-   before/after (reorder as a sibling) vs. nest (become a child) — see the
-   categoryList dragover handler in renderer.js. */
-.notes__categoryItem.is-dropBefore {
+/* Reorder-drag insertion line: which half (top/bottom) of the hovered row
+   the cursor is over decides before/after — shared by the category tree
+   (see its dragover handler, which also adds a right-half "nest" mode) and
+   the plain note list. */
+.notes__categoryItem.is-dropBefore,
+.notes__noteItem.is-dropBefore {
   box-shadow: 0 -2px 0 0 #7fb5ff;
 }
 
-.notes__categoryItem.is-dropAfter {
+.notes__categoryItem.is-dropAfter,
+.notes__noteItem.is-dropAfter {
   box-shadow: 0 2px 0 0 #7fb5ff;
 }
 
@@ -433,10 +436,6 @@ html, body {
 
 .notes__categoryList.is-dropRootEnd {
   box-shadow: inset 0 -2px 0 0 #7fb5ff;
-}
-
-.notes__noteItem.is-dragover {
-  outline: 1px dashed #7fb5ff;
 }
 
 .notes__contextMenu {

@@ -41,6 +41,7 @@ let currentAttachments = []; // files attached to the currently-open note
 // dragover has picked a target/zone, where a drop would actually land.
 let draggedNoteId = null;
 let draggedNoteFromCategoryId = null;
+let noteDropTarget = null; // { targetId, mode: 'before' | 'after' } | { targetId: null, mode: 'end' } | null
 let draggedCategoryId = null;
 let draggedCategoryParentId = null;
 let categoryDropTarget = null; // { targetId, mode: 'before' | 'after' | 'nest' } | { targetId: null, mode: 'root-end' } | null
@@ -124,38 +125,6 @@ function formatTime(iso) {
     minute: '2-digit',
     hour12: true,
   });
-}
-
-// Swap point inside each row, as a fraction of its height, measured from the
-// top — lower than 0.5 (the geometric midpoint) means the cursor only needs
-// to reach partway into a row before the drag-target flips, so the reachable
-// swap zone starts sooner instead of requiring you to pass dead center.
-const SWAP_THRESHOLD_RATIO = 0.2;
-
-/**
- * Sortable-style helper: finds which sibling the dragged element should land before.
- * The trigger line sits near whichever edge of a row you're approaching from
- * (top edge when dragging downward into it, bottom edge when dragging upward
- * into it) — using a single top-anchored line for both directions made upward
- * drags need to travel almost a full row further than downward ones to swap.
- */
-function getDragAfterElement(container, y, selector) {
-  const dragging = container.querySelector('.is-dragging');
-  const items = [...container.querySelectorAll(`${selector}:not(.is-dragging)`)];
-
-  return items.reduce(
-    (closest, child) => {
-      const box = child.getBoundingClientRect();
-      const approachingFromAbove = dragging
-        ? !!(dragging.compareDocumentPosition(child) & Node.DOCUMENT_POSITION_FOLLOWING)
-        : true;
-      const ratio = approachingFromAbove ? SWAP_THRESHOLD_RATIO : 1 - SWAP_THRESHOLD_RATIO;
-      const offset = y - box.top - box.height * ratio;
-      if (offset < 0 && offset > closest.offset) return { offset, element: child };
-      return closest;
-    },
-    { offset: Number.NEGATIVE_INFINITY, element: null }
-  ).element;
 }
 
 /** Nearest-by-distance match (unlike a precise hover test) so a whole sidebar column, not just one row's exact pixels, counts as "over" that category. */
@@ -621,34 +590,66 @@ function renderNotes() {
       e.dataTransfer.setData('text/plain', note.id);
       li.classList.add('is-dragging');
     });
-    li.addEventListener('dragend', async () => {
+    li.addEventListener('dragend', () => {
+      // The actual reorder is committed in noteListEl's `drop` handler (it
+      // needs noteDropTarget, computed live during dragover) — this is just
+      // cleanup, and the fallback if the drop landed somewhere `drop` never fires
+      // (e.g. it went to a different category instead — that drop handler
+      // already rebuilt this list and reset draggedNoteId by the time this runs).
       li.classList.remove('is-dragging');
-      // If it landed in a different category, that drop handler already
-      // rebuilt this list (and reset draggedNoteId) — nothing left to commit here.
-      if (draggedNoteId === note.id) {
-        const orderedIds = [...noteListEl.querySelectorAll('.notes__noteItem')].map((el) => el.dataset.id);
-        notes.sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id));
-        await window.notesAPI.reorderNotes(notes.map((n, i) => ({ id: n.id, order: i * 1000 })));
-      }
+      clearNoteDropIndicators();
       draggedNoteId = null;
       draggedNoteFromCategoryId = null;
+      noteDropTarget = null;
     });
 
     noteListEl.appendChild(li);
   }
 }
 
-// Reordering notes within the currently-open category: same live push-apart
-// preview as the category list, added once since noteListEl persists across renders.
+function clearNoteDropIndicators() {
+  noteListEl.querySelectorAll('.is-dropBefore, .is-dropAfter').forEach((el) => {
+    el.classList.remove('is-dropBefore', 'is-dropAfter');
+  });
+}
+
+// Reordering notes within the currently-open category: same before/after
+// insertion-line preview as the category list, added once since noteListEl
+// persists across renders.
 noteListEl.addEventListener('dragover', (e) => {
   if (!draggedNoteId) return;
   e.preventDefault();
   autoScrollWhileDragging(noteListEl, e.clientY);
-  const dragging = noteListEl.querySelector('.is-dragging');
-  if (!dragging) return;
-  const afterElement = getDragAfterElement(noteListEl, e.clientY, '.notes__noteItem');
-  if (afterElement == null) noteListEl.appendChild(dragging);
-  else noteListEl.insertBefore(dragging, afterElement);
+  clearNoteDropIndicators();
+  const hovered = e.target.closest('.notes__noteItem');
+  if (!hovered || hovered.dataset.id === draggedNoteId) {
+    noteDropTarget = { targetId: null, mode: 'end' };
+    return;
+  }
+  const rect = hovered.getBoundingClientRect();
+  const overTopHalf = e.clientY - rect.top < rect.height / 2;
+  noteDropTarget = { targetId: hovered.dataset.id, mode: overTopHalf ? 'before' : 'after' };
+  hovered.classList.add(overTopHalf ? 'is-dropBefore' : 'is-dropAfter');
+});
+
+noteListEl.addEventListener('drop', async (e) => {
+  if (!draggedNoteId || !noteDropTarget) return;
+  e.preventDefault();
+  const node = notes.find((n) => n.id === draggedNoteId);
+  if (!node) return;
+  notes.splice(notes.indexOf(node), 1);
+
+  let insertIndex = notes.length; // 'end', or a stale target that's gone missing
+  if (noteDropTarget.targetId) {
+    const targetIndex = notes.findIndex((n) => n.id === noteDropTarget.targetId);
+    if (targetIndex !== -1) insertIndex = noteDropTarget.mode === 'after' ? targetIndex + 1 : targetIndex;
+  }
+  notes.splice(insertIndex, 0, node);
+  renderNotes();
+  await window.notesAPI.reorderNotes(notes.map((n, i) => ({ id: n.id, order: i * 1000 })));
+
+  clearNoteDropIndicators();
+  noteDropTarget = null;
 });
 
 async function handleNoteDroppedOnCategory(noteId, fromCategoryId, toCategoryId) {
