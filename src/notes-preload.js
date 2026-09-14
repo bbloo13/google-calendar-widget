@@ -3,6 +3,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('notesAPI', {
   listCategories: () => ipcRenderer.invoke('notes:list-categories'),
   createCategory: (name, parentId) => ipcRenderer.invoke('notes:create-category', { name, parentId }),
+  moveCategory: (categoryId, fromParentId, toParentId) =>
+    ipcRenderer.invoke('notes:move-category', { categoryId, fromParentId, toParentId }),
   deleteCategory: (categoryId) => ipcRenderer.invoke('notes:delete-category', categoryId),
   listNotes: (categoryId) => ipcRenderer.invoke('notes:list-notes', categoryId),
   readNote: (fileId) => ipcRenderer.invoke('notes:read-note', fileId),
@@ -21,6 +23,7 @@ contextBridge.exposeInMainWorld('notesAPI', {
   addEvent: (payload) => ipcRenderer.invoke('add-calendar-event', payload),
   listAttachments: (noteId) => ipcRenderer.invoke('notes:list-attachments', noteId),
   uploadAttachment: (payload) => ipcRenderer.invoke('notes:upload-attachment', payload),
+  renameAttachment: (fileId, name) => ipcRenderer.invoke('notes:rename-attachment', { fileId, name }),
   downloadAttachment: (fileId) => ipcRenderer.invoke('notes:download-attachment', fileId),
   previewAttachment: (fileId) => ipcRenderer.invoke('notes:preview-attachment', fileId),
   deleteAttachment: (fileId) => ipcRenderer.invoke('notes:delete-attachment', fileId),

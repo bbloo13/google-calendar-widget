@@ -14,6 +14,7 @@ const monthLabelEl = document.getElementById('monthLabel');
 const monthWeeksEl = document.getElementById('monthWeeks');
 const prevMonthBtn = document.getElementById('prevMonthBtn');
 const nextMonthBtn = document.getElementById('nextMonthBtn');
+const gridProgressBar = createProgressBar(document.getElementById('gridProgressBar'));
 
 const eventContextMenu = document.getElementById('eventContextMenu');
 const editEventMenuItem = document.getElementById('editEventMenuItem');
@@ -440,7 +441,9 @@ async function loadList(view) {
 }
 
 async function loadGrid(offset) {
+  gridProgressBar.start();
   const payload = await window.calendarAPI.getGrid(offset);
+  gridProgressBar.finish();
   if (!payload.ok) {
     renderFooter(null, payload.error);
     return;
@@ -489,12 +492,26 @@ notesBtn.addEventListener('click', () => {
 gridToggleBtn.addEventListener('click', async () => {
   gridOpen = !gridOpen;
   gridToggleBtn.classList.toggle('is-active', gridOpen);
-  gridPanelEl.classList.toggle('is-visible', gridOpen);
-  await window.calendarAPI.setGridOpen(gridOpen);
 
+  // setGridOpen (window resize) is an async IPC round-trip, not instant like
+  // the classList toggle — flipping is-visible before it resolves left a
+  // brief window where the panel was already flex-displayed but the OS
+  // window hadn't grown yet, so it rendered squeezed/overlapping the widget
+  // until the resize caught up and it "popped" into place. Resize (or
+  // shrink) first, then flip the CSS, so there's nothing to catch up to.
   if (gridOpen) {
+    await window.calendarAPI.setGridOpen(gridOpen);
+    gridPanelEl.classList.add('is-visible');
+    monthOffset = 0;
     await loadGrid(monthOffset);
   } else {
+    gridPanelEl.classList.remove('is-visible');
+    // Give Chromium a chance to actually paint the hidden state before the
+    // native window shrink fires — otherwise the resize can land before the
+    // display:none repaint does, and it stretches the still-wide old frame
+    // into the new narrow bounds for a frame, reading as an overlap/flash.
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    await window.calendarAPI.setGridOpen(gridOpen);
     selectedCellKey = null;
     await loadList(currentView);
   }

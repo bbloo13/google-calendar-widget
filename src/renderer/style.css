@@ -19,6 +19,12 @@ html, body {
   height: 100%;
   display: flex;
   flex-direction: row;
+  justify-content: flex-end; /* keep .widget pinned to the right edge — the OS
+    window resize and the .gridPanel CSS transition don't land at exactly
+    the same moment, and with the default flex-start any leftover slack
+    briefly appeared on the wrong side, reading as .widget jumping left
+    then getting shoved back right. flex-end means slack always shows up
+    on the left, where the grid panel is animating anyway. */
   gap: 8px;
 }
 
@@ -139,9 +145,16 @@ html, body {
   color: #4a4a56;
 }
 
+.gridPanel__cell.is-today {
+  /* A border around the whole cell (number + its event tags), not just a
+     ring on the number — a small ring alone (tried first, in a couple of
+     colors) never read as more than a slightly-off event tag. */
+  border: 2px solid rgba(255, 255, 255, 0.85);
+}
+
 .gridPanel__cell.is-today .gridPanel__cellNum {
-  background: #7fb5ff;
-  color: #14141a;
+  font-weight: 700;
+  color: #ffffff;
 }
 
 .gridPanel__cell.is-selected {

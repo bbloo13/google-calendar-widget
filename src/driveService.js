@@ -212,6 +212,18 @@ async function moveNote(auth, fileId, fromCategoryId, toCategoryId) {
   });
 }
 
+/** Re-parents a category folder (changes its Drive parent) — used to nest it under another category, or un-nest it back to root. */
+async function moveCategory(auth, categoryId, fromParentId, toParentId) {
+  const drive = driveClient(auth);
+  await drive.files.update({
+    fileId: categoryId,
+    addParents: toParentId,
+    removeParents: fromParentId,
+    resource: { appProperties: { order: String(Date.now()) } },
+    fields: 'id,parents',
+  });
+}
+
 /** Searches note titles and content across every category (Drive's fullText index covers both). */
 async function searchNotes(auth, term) {
   const drive = driveClient(auth);
@@ -290,6 +302,7 @@ module.exports = {
   trashFile,
   reorderItems,
   moveNote,
+  moveCategory,
   searchNotes,
   getRootFolderUrl,
   uploadAttachment,

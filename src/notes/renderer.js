@@ -26,6 +26,7 @@ const renameCategoryMenuItem = document.getElementById('renameCategoryMenuItem')
 const deleteCategoryMenuItem = document.getElementById('deleteCategoryMenuItem');
 
 let categories = []; // tree: [{ id, name, noteCount, children: [...] }]
+let rootCategoryId = null; // real Drive folder id that top-level categories' parent is — filled in by loadCategories()
 let notes = [];
 let selectedCategoryId = null;
 let selectedNoteId = null;
@@ -35,12 +36,14 @@ let expandedCategoryIds = new Set();
 let currentAttachments = []; // files attached to the currently-open note
 
 // Drag-and-drop state: a note carries its source category so a drop on a
-// different category moves it; a category also carries its parent so reorder
-// is scoped to siblings (dragging never re-nests a category).
+// different category moves it; a category also carries its parent (so a
+// same-parent reorder can be told apart from a re-parent) plus, once
+// dragover has picked a target/zone, where a drop would actually land.
 let draggedNoteId = null;
 let draggedNoteFromCategoryId = null;
 let draggedCategoryId = null;
 let draggedCategoryParentId = null;
+let categoryDropTarget = null; // { targetId, mode: 'before' | 'after' | 'nest' } | { targetId: null, mode: 'root-end' } | null
 
 const ROOT_PARENT_KEY = '__root__';
 
@@ -69,6 +72,29 @@ function findCategoryContainer(id, list = categories) {
     if (found) return found;
   }
   return null;
+}
+
+/** parentKey (a real category id, or the ROOT_PARENT_KEY sentinel) -> the real Drive folder id it corresponds to. */
+function realParentId(parentKey) {
+  return parentKey === ROOT_PARENT_KEY ? rootCategoryId : parentKey;
+}
+
+/** parentKey (ROOT_PARENT_KEY or a category id) that directly holds `id` — the tree-shaped counterpart to findCategoryContainer. */
+function findParentKeyOf(id, list = categories, parentKey = ROOT_PARENT_KEY) {
+  for (const cat of list) {
+    if (cat.id === id) return parentKey;
+    const found = findParentKeyOf(id, cat.children || [], cat.id);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
+
+/** True if `id` is `rootId` itself or nested anywhere underneath it — used to block a drag from being dropped onto its own subtree (that would orphan it). */
+function isSelfOrDescendant(rootId, id) {
+  if (rootId === id) return true;
+  const node = findCategory(rootId);
+  if (!node) return false;
+  return (node.children || []).some((child) => isSelfOrDescendant(child.id, id));
 }
 
 /** Expands every ancestor of `id` so it's visible in the tree (e.g. after jumping to it from search). */
@@ -162,7 +188,6 @@ function renderCategoryNode(cat, depth, parentKey) {
   const li = document.createElement('li');
   li.className = 'notes__categoryItem' + (cat.id === selectedCategoryId ? ' is-active' : '');
   li.dataset.id = cat.id;
-  li.dataset.parentKey = parentKey;
   li.dataset.depth = String(depth);
   li.style.paddingLeft = `${8 + depth * 14}px`;
   li.draggable = true;
@@ -204,24 +229,17 @@ function renderCategoryNode(cat, depth, parentKey) {
     e.dataTransfer.setData('text/plain', cat.id); // some platforms need real payload for drop to fire reliably
     li.classList.add('is-dragging');
   });
-  li.addEventListener('dragend', async () => {
+  li.addEventListener('dragend', () => {
+    // The actual move/reorder is committed in the container's `drop` handler
+    // (it needs categoryDropTarget, computed live during dragover) — this is
+    // just cleanup, and also the fallback if the drop landed somewhere that
+    // never fired `drop` at all.
     li.classList.remove('is-dragging');
-    categoryListEl.querySelectorAll('.is-dragover').forEach((el) => el.classList.remove('is-dragover'));
-    // The dragover handler below already reordered the live DOM as a preview —
-    // just resync the backing array and persist to whatever order is now on screen.
-    // Scoped to same-parent siblings only, so a drag never re-nests a category.
-    if (draggedCategoryId === cat.id) {
-      const siblingSelector = `.notes__categoryItem[data-parent-key="${CSS.escape(parentKey)}"]`;
-      const orderedIds = [...categoryListEl.querySelectorAll(siblingSelector)].map((el) => el.dataset.id);
-      const container = findCategoryContainer(cat.id);
-      if (container) {
-        container.sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id));
-        await window.notesAPI.reorderCategories(container.map((c, i) => ({ id: c.id, order: i * 1000 })));
-      }
-    }
+    clearCategoryDropIndicators();
     draggedCategoryId = null;
     draggedCategoryParentId = null;
     draggedNoteId = null;
+    categoryDropTarget = null;
   });
 
   categoryListEl.appendChild(li);
@@ -236,27 +254,88 @@ function renderCategories() {
   for (const cat of categories) renderCategoryNode(cat, 0, ROOT_PARENT_KEY);
 }
 
+function clearCategoryDropIndicators() {
+  categoryListEl.querySelectorAll('.is-dropBefore, .is-dropAfter, .is-dropNest').forEach((el) => {
+    el.classList.remove('is-dropBefore', 'is-dropAfter', 'is-dropNest');
+  });
+  categoryListEl.classList.remove('is-dropRootEnd');
+}
+
+/**
+ * Applies a drag-computed placement to the in-memory tree, re-renders
+ * immediately (optimistic), then persists: `moveCategory` only when the
+ * parent actually changed, plus `reorderCategories` on whichever container
+ * the category ended up in either way (a plain reorder is just this last
+ * part with the same parent before and after).
+ */
+async function commitCategoryDrop(draggedId, oldParentKey, target) {
+  const node = findCategory(draggedId);
+  const oldContainer = findCategoryContainer(draggedId);
+  if (!node || !oldContainer) return;
+  oldContainer.splice(oldContainer.indexOf(node), 1);
+
+  let newParentKey;
+  let newContainer;
+  let insertIndex;
+
+  if (target.mode === 'nest') {
+    const parentNode = findCategory(target.targetId);
+    if (!parentNode) return;
+    newParentKey = target.targetId;
+    if (!parentNode.children) parentNode.children = [];
+    newContainer = parentNode.children;
+    insertIndex = newContainer.length; // becomes the last child
+    expandedCategoryIds.add(target.targetId); // so the newly-nested category is visible right away
+  } else if (target.mode === 'root-end') {
+    newParentKey = ROOT_PARENT_KEY;
+    newContainer = categories;
+    insertIndex = newContainer.length;
+  } else {
+    // 'before' / 'after' a sibling — lands at that sibling's own level, wherever that is.
+    newParentKey = findParentKeyOf(target.targetId);
+    newContainer = newParentKey === ROOT_PARENT_KEY ? categories : findCategory(newParentKey)?.children;
+    if (!newContainer) return;
+    const targetIndex = newContainer.findIndex((c) => c.id === target.targetId);
+    if (targetIndex === -1) return;
+    insertIndex = target.mode === 'after' ? targetIndex + 1 : targetIndex;
+  }
+
+  newContainer.splice(insertIndex, 0, node);
+  renderCategories();
+
+  if (newParentKey !== oldParentKey) {
+    await window.notesAPI.moveCategory(draggedId, realParentId(oldParentKey), realParentId(newParentKey));
+  }
+  await window.notesAPI.reorderCategories(newContainer.map((c, i) => ({ id: c.id, order: i * 1000 })));
+}
+
 // Container-level drag handlers (added once — the container element itself
 // survives re-renders, only its children get replaced).
 categoryListEl.addEventListener('dragover', (e) => {
   e.preventDefault(); // required for drop to fire at all
   autoScrollWhileDragging(categoryListEl, e.clientY);
   if (draggedCategoryId) {
-    // Reordering categories: live-move the dragged row as you hover, pushing
-    // siblings apart, instead of requiring a pixel-precise drop on one item.
-    // Scoped to the dragged item's own parent, so it can't jump to a different nesting level.
-    const dragging = categoryListEl.querySelector('.is-dragging');
-    if (!dragging) return;
-    const siblingSelector = `.notes__categoryItem[data-parent-key="${CSS.escape(draggedCategoryParentId)}"]`;
-    const afterElement = getDragAfterElement(categoryListEl, e.clientY, siblingSelector);
-    if (afterElement == null) {
-      // Append after the last sibling (not necessarily the last DOM child overall).
-      const siblings = categoryListEl.querySelectorAll(`${siblingSelector}:not(.is-dragging)`);
-      const lastSibling = siblings[siblings.length - 1];
-      if (lastSibling) lastSibling.after(dragging);
-      else categoryListEl.appendChild(dragging);
+    clearCategoryDropIndicators();
+    const hovered = e.target.closest('.notes__categoryItem');
+    if (!hovered || isSelfOrDescendant(draggedCategoryId, hovered.dataset.id)) {
+      // Nothing valid under the cursor — either empty space below the list,
+      // or the dragged item itself / one of its own descendants (dropping
+      // there would orphan it). Either way, treat it as "send to the end of
+      // the top level," the same place an empty-space drop would land.
+      categoryDropTarget = { targetId: null, mode: 'root-end' };
+      categoryListEl.classList.add('is-dropRootEnd');
+      return;
+    }
+    const rect = hovered.getBoundingClientRect();
+    const overRightHalf = e.clientX - rect.left > rect.width / 2;
+    if (overRightHalf) {
+      // Whole right half, top or bottom — unconditionally "nest under this one".
+      categoryDropTarget = { targetId: hovered.dataset.id, mode: 'nest' };
+      hovered.classList.add('is-dropNest');
     } else {
-      categoryListEl.insertBefore(dragging, afterElement);
+      const overTopHalf = e.clientY - rect.top < rect.height / 2;
+      categoryDropTarget = { targetId: hovered.dataset.id, mode: overTopHalf ? 'before' : 'after' };
+      hovered.classList.add(overTopHalf ? 'is-dropBefore' : 'is-dropAfter');
     }
   } else if (draggedNoteId) {
     // Dragging a note over the sidebar: highlight whichever category is nearest —
@@ -274,9 +353,11 @@ categoryListEl.addEventListener('drop', async (e) => {
     const target = categoryListEl.querySelector('.notes__categoryItem.is-dragover');
     categoryListEl.querySelectorAll('.is-dragover').forEach((el) => el.classList.remove('is-dragover'));
     if (target) await handleNoteDroppedOnCategory(draggedNoteId, draggedNoteFromCategoryId, target.dataset.id);
+  } else if (draggedCategoryId && categoryDropTarget) {
+    await commitCategoryDrop(draggedCategoryId, draggedCategoryParentId, categoryDropTarget);
   }
-  // Category-reorder commit happens in that item's `dragend`, since the DOM
-  // preview during dragover already reflects the final order.
+  clearCategoryDropIndicators();
+  categoryDropTarget = null;
 });
 
 // --- Context menu (add sub-category / rename / delete) — shared by categories and notes ---
@@ -434,6 +515,7 @@ async function loadCategories() {
   categoryProgressBar.finish();
   if (!res.ok) return;
   categories = res.categories;
+  rootCategoryId = res.rootId;
   renderCategories();
 }
 
@@ -659,11 +741,8 @@ function paintNote(note) {
   saveStateEl.textContent = `저장됨 ${formatTime(note.modifiedTime)}`;
 }
 
-/** Walks up from the selection to the direct line-<div> it's in (a child of contentArea). */
-function getCurrentLine() {
-  const sel = document.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
-  let node = sel.getRangeAt(0).startContainer;
+/** Walks up from `node` to the direct line-<div> it's in (a child of contentArea). */
+function lineForNode(node) {
   while (node && node !== contentArea) {
     if (node.parentElement === contentArea) return node;
     node = node.parentNode;
@@ -671,9 +750,40 @@ function getCurrentLine() {
   return null;
 }
 
+/** Walks up from the selection to the direct line-<div> it's in (a child of contentArea). */
+function getCurrentLine() {
+  const sel = document.getSelection();
+  if (!sel || sel.rangeCount === 0) return null;
+  return lineForNode(sel.getRangeAt(0).startContainer);
+}
+
+/**
+ * Every line-<div> the current selection spans, start through end inclusive
+ * (just the one line for a collapsed cursor) — so the strike toggle below
+ * can act on a whole drag-selected block instead of only wherever the
+ * selection happened to start.
+ */
+function getSelectedLines() {
+  const sel = document.getSelection();
+  if (!sel || sel.rangeCount === 0) return [];
+  const range = sel.getRangeAt(0);
+  const startLine = lineForNode(range.startContainer);
+  const endLine = lineForNode(range.endContainer);
+  if (!startLine) return [];
+  if (!endLine || startLine === endLine) return [startLine];
+
+  const lines = [];
+  for (let node = startLine; node; node = node.nextElementSibling) {
+    lines.push(node);
+    if (node === endLine) break;
+  }
+  return lines;
+}
+
 function updateStrikeBtnState() {
-  const line = getCurrentLine();
-  strikeBtn.classList.toggle('is-active', !!(line && line.classList && line.classList.contains('note-line--struck')));
+  const lines = getSelectedLines();
+  const allStruck = lines.length > 0 && lines.every((l) => l.classList.contains('note-line--struck'));
+  strikeBtn.classList.toggle('is-active', allStruck);
 }
 
 contentArea.addEventListener('click', updateStrikeBtnState);
@@ -684,9 +794,16 @@ contentArea.addEventListener('keyup', updateStrikeBtnState);
 // toolbar buttons over a contenteditable region use.
 strikeBtn.addEventListener('mousedown', (e) => e.preventDefault());
 strikeBtn.addEventListener('click', () => {
-  const line = getCurrentLine();
-  if (!line) return;
-  line.classList.toggle('note-line--struck');
+  const lines = getSelectedLines();
+  if (lines.length === 0) return;
+  // If every selected line is already struck, unstrike them all; otherwise
+  // strike them all — a uniform end state, not each line toggling
+  // independently, which for a mixed selection would strike some and
+  // unstrike others in one click.
+  const allStruck = lines.every((l) => l.classList.contains('note-line--struck'));
+  for (const line of lines) {
+    line.classList.toggle('note-line--struck', !allStruck);
+  }
   updateStrikeBtnState();
   contentArea.dispatchEvent(new Event('input', { bubbles: true }));
 });
@@ -780,6 +897,11 @@ function renderAttachments() {
         downloadAttachmentFlow(att, chip, icon);
       }
     });
+    chip.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      showAttachmentContextMenu(att, chip, name);
+    });
     attachmentsListEl.appendChild(chip);
   }
 }
@@ -826,6 +948,78 @@ function showAttachmentChoice(att, chip, icon) {
   menu.appendChild(downloadBtn);
   document.body.appendChild(menu);
   openAttachmentMenu = menu;
+}
+
+/**
+ * Right-click menu on an attachment chip: rename + delete, matching how
+ * notes/categories already do both from one right-click menu elsewhere in
+ * this app. Delete also still has its own hover × on the chip for a
+ * one-click path — this just makes the menu feel complete alongside it,
+ * not an alternative that replaces it.
+ */
+function showAttachmentContextMenu(att, chip, nameEl) {
+  closeAttachmentMenu();
+  const rect = chip.getBoundingClientRect();
+  const menu = document.createElement('div');
+  menu.className = 'notes__contextMenu is-visible';
+  menu.style.left = `${rect.left}px`;
+  menu.style.top = `${rect.bottom + 4}px`;
+
+  const renameBtn = document.createElement('button');
+  renameBtn.className = 'notes__contextMenuItem';
+  renameBtn.textContent = '수정하기';
+  renameBtn.addEventListener('click', () => {
+    closeAttachmentMenu();
+    startRenameAttachment(att, chip, nameEl);
+  });
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'notes__contextMenuItem notes__contextMenuItem--danger';
+  deleteBtn.textContent = '삭제';
+  deleteBtn.addEventListener('click', () => {
+    closeAttachmentMenu();
+    removeAttachmentFlow(att.id, chip);
+  });
+
+  menu.appendChild(renameBtn);
+  menu.appendChild(deleteBtn);
+  document.body.appendChild(menu);
+  openAttachmentMenu = menu;
+}
+
+/** Inline rename of an attachment's filename (keeps its extension editable too, unlike note titles). */
+function startRenameAttachment(att, chip, nameEl) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = att.name;
+  input.className = 'notes__attachmentName notes__attachmentName--editing';
+  chip.replaceChild(input, nameEl);
+  input.focus();
+  input.select();
+
+  let done = false;
+  const finish = async (shouldSave) => {
+    if (done) return;
+    done = true;
+    const newName = input.value.trim();
+    if (shouldSave && newName && newName !== att.name) {
+      input.disabled = true;
+      const res = await window.notesAPI.renameAttachment(att.id, newName);
+      if (res.ok) {
+        att.name = res.attachment.name;
+      } else {
+        alert(`파일명 수정 실패: ${res.error}`);
+      }
+    }
+    renderAttachments(); // rebuilds chips from currentAttachments, so this also covers the failure path
+  };
+
+  input.addEventListener('click', (e) => e.stopPropagation()); // don't trigger the chip's own download while editing
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') finish(true);
+    if (e.key === 'Escape') finish(false);
+  });
+  input.addEventListener('blur', () => finish(true));
 }
 
 document.addEventListener('click', (e) => {

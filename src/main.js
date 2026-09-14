@@ -76,7 +76,18 @@ function defaultPosition() {
   };
 }
 
-/** Resizes the window for the grid panel being open/closed, anchoring the top-right corner. */
+/**
+ * Resizes the window for the grid panel being open/closed, anchoring the
+ * top-right corner (the main widget's edge never moves). This is a single
+ * instant jump, not animated here — the visible motion is owned entirely
+ * by the .gridPanel CSS opacity/margin transition in the renderer, which
+ * calls this before revealing the panel (so the extra space is already
+ * there, still transparent, when the fade-in starts) and after hiding it
+ * (so the space is already invisible when it collapses again). Animating
+ * the OS window bounds on a timer here as well fought the CSS transition's
+ * own clock and read as jittery — one system owning the motion is smoother
+ * than two racing each other.
+ */
 function resizeForGrid(open) {
   if (!mainWindow) return;
   const targetWidth = open ? EXPANDED_WIDTH : COLLAPSED_WIDTH;
@@ -288,8 +299,8 @@ async function withGoogleAuth(fn) {
 
 ipcMain.handle('notes:list-categories', async () => {
   try {
-    const { categories } = await withGoogleAuth((auth) => drive.listCategories(auth));
-    return { ok: true, categories };
+    const { rootId, categories } = await withGoogleAuth((auth) => drive.listCategories(auth));
+    return { ok: true, rootId, categories };
   } catch (err) {
     console.error('Failed to list note categories:', err);
     return { ok: false, error: err.message };
@@ -302,6 +313,16 @@ ipcMain.handle('notes:create-category', async (_event, { name, parentId }) => {
     return { ok: true, category };
   } catch (err) {
     console.error('Failed to create category:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:move-category', async (_event, { categoryId, fromParentId, toParentId }) => {
+  try {
+    await withGoogleAuth((auth) => drive.moveCategory(auth, categoryId, fromParentId, toParentId));
+    return { ok: true };
+  } catch (err) {
+    console.error('Failed to move category:', err);
     return { ok: false, error: err.message };
   }
 });
@@ -385,6 +406,16 @@ ipcMain.handle('notes:list-attachments', async (_event, noteId) => {
     return { ok: true, attachments };
   } catch (err) {
     console.error('Failed to list attachments:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('notes:rename-attachment', async (_event, { fileId, name }) => {
+  try {
+    const attachment = await withGoogleAuth((auth) => drive.renameItem(auth, fileId, name));
+    return { ok: true, attachment };
+  } catch (err) {
+    console.error('Failed to rename attachment:', err);
     return { ok: false, error: err.message };
   }
 });
