@@ -20,6 +20,44 @@ const addToCalendarBtn = document.getElementById('addToCalendarBtn');
 const attachmentsListEl = document.getElementById('attachmentsList');
 const editorPane = document.querySelector('.notes__editor');
 
+// A single shared indicator element per list, instead of styling on
+// whichever row the drag is "before" or "after" — with a `gap` between
+// rows, styling both rows independently put the line at two different
+// pixels for what's logically the same boundary (below row N vs. above row
+// N+1), which read as a jitter switching between them. One element whose
+// position is computed once (see computeBoundaryY) can't disagree with itself.
+const categoryDropLineEl = document.createElement('div');
+categoryDropLineEl.className = 'notes__dropLine';
+const noteDropLineEl = document.createElement('div');
+noteDropLineEl.className = 'notes__dropLine';
+
+function showDropLine(lineEl, container, viewportY) {
+  container.appendChild(lineEl); // re-attach in case a render replaced the container's children since
+  const containerRect = container.getBoundingClientRect();
+  lineEl.style.top = `${viewportY - containerRect.top + container.scrollTop}px`;
+  lineEl.style.display = 'block';
+}
+
+function hideDropLine(lineEl) {
+  lineEl.style.display = 'none';
+}
+
+/**
+ * The boundary line's viewport Y for inserting before/after `target` —
+ * computed from whichever row is physically adjacent on screen, so
+ * "after the row above" and "before the row below" resolve to the exact
+ * same number when they're the same boundary.
+ */
+function computeBoundaryY(target, mode, selector) {
+  const targetRect = target.getBoundingClientRect();
+  const neighbor = mode === 'before' ? target.previousElementSibling : target.nextElementSibling;
+  if (!neighbor || !neighbor.matches(selector)) {
+    return mode === 'before' ? targetRect.top : targetRect.bottom;
+  }
+  const neighborRect = neighbor.getBoundingClientRect();
+  return mode === 'before' ? (neighborRect.bottom + targetRect.top) / 2 : (targetRect.bottom + neighborRect.top) / 2;
+}
+
 const categoryContextMenu = document.getElementById('categoryContextMenu');
 const addSubcategoryMenuItem = document.getElementById('addSubcategoryMenuItem');
 const renameCategoryMenuItem = document.getElementById('renameCategoryMenuItem');
@@ -224,9 +262,8 @@ function renderCategories() {
 }
 
 function clearCategoryDropIndicators() {
-  categoryListEl.querySelectorAll('.is-dropBefore, .is-dropAfter, .is-dropNest').forEach((el) => {
-    el.classList.remove('is-dropBefore', 'is-dropAfter', 'is-dropNest');
-  });
+  hideDropLine(categoryDropLineEl);
+  categoryListEl.querySelectorAll('.is-dropNest').forEach((el) => el.classList.remove('is-dropNest'));
   categoryListEl.classList.remove('is-dropRootEnd');
 }
 
@@ -276,6 +313,7 @@ async function commitCategoryDrop(draggedId, oldParentKey, target) {
     await window.notesAPI.moveCategory(draggedId, realParentId(oldParentKey), realParentId(newParentKey));
   }
   await window.notesAPI.reorderCategories(newContainer.map((c, i) => ({ id: c.id, order: i * 1000 })));
+  scheduleQuietCategoryResync();
 }
 
 // Container-level drag handlers (added once — the container element itself
@@ -303,8 +341,9 @@ categoryListEl.addEventListener('dragover', (e) => {
       hovered.classList.add('is-dropNest');
     } else {
       const overTopHalf = e.clientY - rect.top < rect.height / 2;
-      categoryDropTarget = { targetId: hovered.dataset.id, mode: overTopHalf ? 'before' : 'after' };
-      hovered.classList.add(overTopHalf ? 'is-dropBefore' : 'is-dropAfter');
+      const mode = overTopHalf ? 'before' : 'after';
+      categoryDropTarget = { targetId: hovered.dataset.id, mode };
+      showDropLine(categoryDropLineEl, categoryListEl, computeBoundaryY(hovered, mode, '.notes__categoryItem'));
     }
   } else if (draggedNoteId) {
     // Dragging a note over the sidebar: highlight whichever category is nearest —
@@ -488,6 +527,29 @@ async function loadCategories() {
   renderCategories();
 }
 
+let quietCategoryResyncTimer = null;
+
+/**
+ * Re-fetches categories from Drive (the actual source of truth) and
+ * silently overwrites the in-memory tree with it, a few seconds after a
+ * drag-and-drop move — self-heals if `moveCategory`/`reorderCategories`
+ * silently failed (dropped connection mid-request, etc.) without needing
+ * to track and roll back that one specific optimistic edit, since a full
+ * re-fetch is already the simplest possible "is this still accurate?"
+ * check. No progress bar — this should be invisible unless it actually
+ * changes something. Debounced so several drags in a row only trigger one.
+ */
+function scheduleQuietCategoryResync(delayMs = 4000) {
+  clearTimeout(quietCategoryResyncTimer);
+  quietCategoryResyncTimer = setTimeout(async () => {
+    const res = await window.notesAPI.listCategories();
+    if (!res.ok) return;
+    categories = res.categories;
+    rootCategoryId = res.rootId;
+    renderCategories();
+  }, delayMs);
+}
+
 async function selectCategory(id) {
   selectedCategoryId = id;
   selectedNoteId = null;
@@ -608,9 +670,7 @@ function renderNotes() {
 }
 
 function clearNoteDropIndicators() {
-  noteListEl.querySelectorAll('.is-dropBefore, .is-dropAfter').forEach((el) => {
-    el.classList.remove('is-dropBefore', 'is-dropAfter');
-  });
+  hideDropLine(noteDropLineEl);
 }
 
 // Reordering notes within the currently-open category: same before/after
@@ -628,8 +688,9 @@ noteListEl.addEventListener('dragover', (e) => {
   }
   const rect = hovered.getBoundingClientRect();
   const overTopHalf = e.clientY - rect.top < rect.height / 2;
-  noteDropTarget = { targetId: hovered.dataset.id, mode: overTopHalf ? 'before' : 'after' };
-  hovered.classList.add(overTopHalf ? 'is-dropBefore' : 'is-dropAfter');
+  const mode = overTopHalf ? 'before' : 'after';
+  noteDropTarget = { targetId: hovered.dataset.id, mode };
+  showDropLine(noteDropLineEl, noteListEl, computeBoundaryY(hovered, mode, '.notes__noteItem'));
 });
 
 noteListEl.addEventListener('drop', async (e) => {

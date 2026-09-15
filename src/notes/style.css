@@ -86,6 +86,7 @@ html, body {
 }
 
 .notes__categoryList {
+  position: relative; /* anchors .notes__dropLine's absolute positioning */
   list-style: none;
   flex: 1;
   overflow-y: auto;
@@ -169,6 +170,7 @@ html, body {
 }
 
 .notes__noteList {
+  position: relative; /* anchors .notes__dropLine's absolute positioning */
   list-style: none;
   flex: 1;
   overflow-y: auto;
@@ -415,18 +417,20 @@ html, body {
   background: rgba(127, 181, 255, 0.1);
 }
 
-/* Reorder-drag insertion line: which half (top/bottom) of the hovered row
-   the cursor is over decides before/after — shared by the category tree
-   (see its dragover handler, which also adds a right-half "nest" mode) and
-   the plain note list. */
-.notes__categoryItem.is-dropBefore,
-.notes__noteItem.is-dropBefore {
-  box-shadow: 0 -2px 0 0 #7fb5ff;
-}
-
-.notes__categoryItem.is-dropAfter,
-.notes__noteItem.is-dropAfter {
-  box-shadow: 0 2px 0 0 #7fb5ff;
+/* Reorder-drag insertion line: one shared element per list (see
+   showDropLine/computeBoundaryY in renderer.js), positioned in JS rather
+   than styled onto whichever row the drag happens to be "before" or
+   "after" — with a `gap` between rows, two independently-styled rows put
+   the line at two different pixels for what's logically the same
+   boundary, which read as jitter switching between them. */
+.notes__dropLine {
+  display: none;
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background: #7fb5ff;
+  pointer-events: none;
 }
 
 .notes__categoryItem.is-dropNest {
