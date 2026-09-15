@@ -1,15 +1,17 @@
 const { google } = require('googleapis');
+const { stripHtml, looksLikeHtml, hasTable, normalizeWhitespace } = require('./mailTextUtils');
 
-// Cached the same way driveService caches its client — rebuilt only when the
-// auth object itself changes (e.g. after a dead-token self-heal).
-let cachedGmail = null;
-let cachedGmailAuth = null;
+// Keyed by the auth object itself rather than one shared slot — with several
+// mail accounts now in play, each has its own OAuth2Client, and a single
+// cached client would just keep evicting whichever account wasn't used most
+// recently. A WeakMap also means a dead-token self-heal's fresh auth object
+// naturally gets its own entry without any cleanup of the old one needed.
+const gmailClients = new WeakMap();
 function gmailClient(auth) {
-  if (!cachedGmail || cachedGmailAuth !== auth) {
-    cachedGmail = google.gmail({ version: 'v1', auth });
-    cachedGmailAuth = auth;
+  if (!gmailClients.has(auth)) {
+    gmailClients.set(auth, google.gmail({ version: 'v1', auth }));
   }
-  return cachedGmail;
+  return gmailClients.get(auth);
 }
 
 function header(headers, name) {
@@ -69,43 +71,6 @@ function decodeBody(data) {
   return Buffer.from(data, 'base64url').toString('utf-8');
 }
 
-function stripHtml(html) {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, '')
-    .replace(/<script[\s\S]*?<\/script>/gi, '')
-    .replace(/<br\s*\/?>/gi, '\n')
-    // A single newline for every block close, `<p>` included — a lot of
-    // transactional mail (like this) wraps every short field in its own
-    // <p>, which isn't a "paragraph" in the prose sense; treating it as one
-    // put a full blank line between every field.
-    .replace(/<\/(p|div|tr|li|h[1-6]|table)>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
-/**
- * Drops every blank line rather than just collapsing runs of them — applied
- * to whichever text extractContent settles on. Real-world HTML email markup
- * (nested tables, spacer divs, a `<p>` per short field) produces wildly
- * different amounts of stray blank lines per sender/template, and no fixed
- * collapse threshold survives contact with all of them; the one rule that
- * can't fail this way is "no blank lines at all" — this reads a little
- * denser for genuinely multi-paragraph mail, but never produces the
- * stretched-out, one-line-per-screen mess a missed case leaves behind.
- */
-function normalizeWhitespace(text) {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0)
-    .join('\n');
-}
-
 /**
  * Walks the MIME part tree for the best plain-text body (falling back to the
  * HTML part, stripped of tags, when there's no text/plain alternative — a
@@ -136,8 +101,21 @@ function extractContent(payload) {
   }
   walk(payload);
 
-  const rawText = plainText || (htmlText ? stripHtml(htmlText) : '');
-  return { text: normalizeWhitespace(rawText), hasAttachment };
+  // Some senders' mail systems mislabel their HTML body as text/plain (the
+  // "plain" part is really just the HTML source dumped as-is) — a plain
+  // part that itself contains tags gets stripped just like the html part
+  // would, instead of being trusted at face value. A table is the other
+  // case where the "plain" part can't be trusted even without tags in it:
+  // it's almost always a naive one-cell-per-line dump with no column
+  // separator, so the HTML's <td>/<tr> structure reads better there.
+  let rawText;
+  if (htmlText && hasTable(htmlText)) rawText = stripHtml(htmlText);
+  else if (plainText && looksLikeHtml(plainText)) rawText = stripHtml(plainText);
+  else if (plainText) rawText = plainText;
+  else if (htmlText) rawText = stripHtml(htmlText);
+  else rawText = '';
+
+  return { text: normalizeWhitespace(rawText), hasAttachment, hasTable: !!(htmlText && hasTable(htmlText)) };
 }
 
 /** Full content for the reading view — from/subject/date plus the extracted text and attachment flag. Also marks it read, like opening mail anywhere else does. */
@@ -148,7 +126,7 @@ async function getMessage(auth, messageId) {
     gmail.users.messages.modify({ userId: 'me', id: messageId, resource: { removeLabelIds: ['UNREAD'] } }),
   ]);
   const { payload } = res.data;
-  const { text, hasAttachment } = extractContent(payload);
+  const { text, hasAttachment, hasTable } = extractContent(payload);
   return {
     id: res.data.id,
     from: displayNameFromHeader(header(payload.headers, 'From')),
@@ -156,6 +134,7 @@ async function getMessage(auth, messageId) {
     date: header(payload.headers, 'Date'),
     text,
     hasAttachment,
+    hasTable,
   };
 }
 

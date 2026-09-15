@@ -8,10 +8,16 @@
  */
 function createProgressBar(bar) {
   let timer = null;
+  let fadeTimeout = null;
   let width = 0;
 
   function start() {
     clearInterval(timer);
+    // finish()'s fade-out is a delayed setTimeout — starting a new run
+    // right after a finish() (as happens between the mail fetch and the
+    // Gemini cleanup pass) can otherwise leave that stale timeout to fire
+    // mid-animation and snap opacity back to 0.
+    clearTimeout(fadeTimeout);
     width = 0;
     bar.style.transition = 'none';
     bar.style.opacity = '1';
@@ -29,7 +35,7 @@ function createProgressBar(bar) {
   function finish() {
     clearInterval(timer);
     bar.style.width = '100%';
-    setTimeout(() => {
+    fadeTimeout = setTimeout(() => {
       bar.style.opacity = '0';
     }, 200);
   }

@@ -8,8 +8,12 @@ contextBridge.exposeInMainWorld('calendarAPI', {
   // just needs to know "is *a* panel open", not which one).
   setSidePanelOpen: (open) => ipcRenderer.invoke('set-side-panel-open', open),
   listTodayMail: () => ipcRenderer.invoke('mail:list-today'),
-  getMailMessage: (messageId) => ipcRenderer.invoke('mail:get-message', messageId),
+  getMailMessage: (provider, accountKey, messageId) =>
+    ipcRenderer.invoke('mail:get-message', { provider, accountKey, messageId }),
   translateMail: (text) => ipcRenderer.invoke('mail:translate', text),
+  cleanMailTable: (text) => ipcRenderer.invoke('mail:clean-table', text),
+  addMailAccount: () => ipcRenderer.invoke('mail:add-account'),
+  addNaverAccount: (email, password) => ipcRenderer.invoke('mail:add-naver-account', { email, password }),
   openCalendarHome: (dateKeyMs) => ipcRenderer.invoke('open-calendar-home', dateKeyMs),
   openNotesWindow: () => ipcRenderer.invoke('open-notes-window'),
   updateEvent: (eventId, title, description) => ipcRenderer.invoke('update-event', { eventId, title, description }),

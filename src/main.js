@@ -3,9 +3,10 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const { fetchAgenda, createEvent, updateEvent, deleteEvent } = require('./calendarService');
-const { withAuthRetry } = require('../auth/googleAuth');
+const { withAuthRetry, addMailAccount, listMailAccountKeys } = require('../auth/googleAuth');
 const drive = require('./driveService');
 const gmail = require('./gmailService');
+const naver = require('./naverService');
 const gemini = require('./geminiService');
 
 // Without this, every single Calendar/Drive API call opened a brand-new TLS
@@ -301,8 +302,8 @@ ipcMain.handle('delete-event', async (_event, eventId) => {
 
 // --- Notes (Google Drive-backed) ---
 
-async function withGoogleAuth(fn) {
-  return withAuthRetry(app.getPath('userData'), fn);
+async function withGoogleAuth(fn, accountKey = 'primary') {
+  return withAuthRetry(app.getPath('userData'), fn, accountKey);
 }
 
 ipcMain.handle('notes:list-categories', async () => {
@@ -554,27 +555,83 @@ ipcMain.handle('notes:open-drive-folder', async () => {
   }
 });
 
-// --- Mail (Gmail-backed) ---
-// Just the one Gmail account tied to the app's own Google sign-in for now —
-// a second Gmail account (and Naver) need their own separate auth entirely,
-// see the account-list UI in the widget, which is already shaped to hold more.
+// --- Mail (Gmail + Naver) ---
+// Gmail: 'primary' is the original single-account identity (shared with
+// Calendar/Drive); any others are mail-only accounts added via
+// mail:add-account, tracked in mail-accounts.json (see googleAuth.js).
+// Naver: a completely separate IMAP-based integration (naverService.js) —
+// no OAuth, just an email + app password stored in naver-accounts.json,
+// both userData files, neither ever in the git repo.
 
 ipcMain.handle('mail:list-today', async () => {
+  const userDataDir = app.getPath('userData');
+  const gmailKeys = ['primary', ...listMailAccountKeys(userDataDir)];
+
+  const gmailResults = Promise.all(
+    gmailKeys.map(async (accountKey) => {
+      try {
+        const summary = await withGoogleAuth((auth) => gmail.listTodayMessages(auth), accountKey);
+        return { ok: true, provider: 'gmail', accountKey, ...summary };
+      } catch (err) {
+        console.error(`Failed to list today's mail for '${accountKey}':`, err);
+        return { ok: false, provider: 'gmail', accountKey, error: err.message };
+      }
+    })
+  );
+
+  const naverResults = Promise.all(
+    naver.listAccounts(userDataDir).map(async (account) => {
+      try {
+        const summary = await naver.listTodayMessages(account);
+        return { ok: true, provider: 'naver', accountKey: account.email, email: account.email, ...summary };
+      } catch (err) {
+        console.error(`Failed to list today's mail for Naver '${account.email}':`, err);
+        return { ok: false, provider: 'naver', accountKey: account.email, error: err.message };
+      }
+    })
+  );
+
+  const accounts = [...(await gmailResults), ...(await naverResults)];
+  return { ok: true, accounts };
+});
+
+ipcMain.handle('mail:get-message', async (_event, { provider, accountKey, messageId }) => {
   try {
-    const summary = await withGoogleAuth((auth) => gmail.listTodayMessages(auth));
-    return { ok: true, ...summary };
+    let message;
+    if (provider === 'naver') {
+      const account = naver.listAccounts(app.getPath('userData')).find((a) => a.email === accountKey);
+      if (!account) throw new Error('네이버 계정을 찾을 수 없어요.');
+      message = await naver.getMessage(account, messageId);
+    } else {
+      message = await withGoogleAuth((auth) => gmail.getMessage(auth, messageId), accountKey);
+    }
+    return { ok: true, message };
   } catch (err) {
-    console.error('Failed to list today\'s mail:', err);
+    console.error('Failed to fetch mail message:', err);
     return { ok: false, error: err.message };
   }
 });
 
-ipcMain.handle('mail:get-message', async (_event, messageId) => {
+ipcMain.handle('mail:add-account', async () => {
   try {
-    const message = await withGoogleAuth((auth) => gmail.getMessage(auth, messageId));
-    return { ok: true, message };
+    const accountKey = await addMailAccount(app.getPath('userData'));
+    const summary = await withGoogleAuth((auth) => gmail.listTodayMessages(auth), accountKey);
+    return { ok: true, accountKey, ...summary };
   } catch (err) {
-    console.error('Failed to fetch mail message:', err);
+    console.error('Failed to add mail account:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('mail:add-naver-account', async (_event, { email, password }) => {
+  try {
+    const userDataDir = app.getPath('userData');
+    await naver.addAccount(userDataDir, email, password);
+    const account = naver.listAccounts(userDataDir).find((a) => a.email === email);
+    const summary = await naver.listTodayMessages(account);
+    return { ok: true, email, ...summary };
+  } catch (err) {
+    console.error('Failed to add Naver account:', err);
     return { ok: false, error: err.message };
   }
 });
@@ -586,6 +643,22 @@ ipcMain.handle('mail:translate', async (_event, text) => {
     return { ok: true, translated };
   } catch (err) {
     console.error('Failed to translate mail:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+// Kept separate from mail:get-message rather than run inline there — the
+// raw extraction is already readable (if a bit flat for table rows), so
+// the message can be shown immediately while this upgrades it in the
+// background instead of the reading view sitting on a blank loading bar
+// for the couple extra seconds Gemini adds.
+ipcMain.handle('mail:clean-table', async (_event, text) => {
+  try {
+    if (!gemini.isConfigured()) return { ok: false, error: 'Gemini API 키가 설정되지 않았어요.' };
+    const cleaned = await gemini.cleanMailContent(text);
+    return { ok: true, cleaned };
+  } catch (err) {
+    console.error('Failed to clean up table mail:', err);
     return { ok: false, error: err.message };
   }
 });

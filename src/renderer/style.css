@@ -14,6 +14,77 @@ html, body {
   user-select: none;
 }
 
+/* A themed stand-in for alert() — see showToast() in renderer.js. Anchored
+   inside whichever panel the triggering action belongs to (passed as
+   `container`, each of .widget/.gridPanel/.mailPanel has position:relative
+   for this) — centered on that panel specifically, not the whole window,
+   which would land it in the gap between panels when a side panel is open. */
+.toast {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 24px);
+  background: #232329;
+  color: #e8e8ea;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  word-break: keep-all; /* don't split a Korean word mid-syllable-block to wrap */
+  overflow-wrap: break-word; /* still wrap the rare unbreakable long token (a URL, etc.) */
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.toast.is-danger {
+  border-color: rgba(255, 100, 100, 0.3);
+  color: #ff8787;
+}
+
+/* Extends the shared confirmDialog (see shared.css) with input fields —
+   used by showNaverLoginDialog() for the one flow in this app that needs
+   actual text entry rather than a plain confirm/cancel choice. */
+.confirmDialog__input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: #e8e8ea;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+
+.confirmDialog__input:focus {
+  border-color: #7fb5ff;
+}
+
+.confirmDialog__idRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.confirmDialog__input--id {
+  flex: 1;
+  min-width: 0;
+}
+
+.confirmDialog__idSuffix {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  color: #8f8fa3;
+}
+
 .app {
   width: 100%;
   height: 100%;
@@ -29,6 +100,7 @@ html, body {
 }
 
 .widget {
+  position: relative; /* anchors .toast */
   flex: 0 0 300px;
   width: 300px;
   height: 100%;
@@ -43,6 +115,7 @@ html, body {
 }
 
 .gridPanel {
+  position: relative; /* anchors .toast for errors raised from this panel */
   display: none;
   flex: 0 0 340px;
   width: 340px;
@@ -222,6 +295,7 @@ html, body {
    expand in place like the notes window's category tree, and opening a
    message swaps .mailPanel__body's content for a reading view. */
 .mailPanel {
+  position: relative; /* anchors .toast for errors raised from this panel */
   display: none;
   flex: 0 0 340px;
   width: 340px;
@@ -287,6 +361,10 @@ html, body {
   color: #e8e8ea;
 }
 
+.mailAccount--account {
+  padding-left: 26px;
+}
+
 .mailAccount:hover {
   background: rgba(255, 255, 255, 0.06);
 }
@@ -305,6 +383,39 @@ html, body {
   white-space: nowrap;
 }
 
+.mailAccount__name--provider {
+  color: #7fb5ff;
+  font-weight: 500;
+}
+
+.mailAccount__addBtn {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: #6f6f83;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.mailAccount__addBtn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mailPanel__empty--account {
+  padding-left: 26px;
+  text-align: left;
+}
+
+.mailPanel__empty--message {
+  padding-left: 56px;
+  text-align: left;
+}
+
 .mailAccount__badge {
   flex: 0 0 auto;
   background: rgba(127, 181, 255, 0.18);
@@ -320,7 +431,7 @@ html, body {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  padding: 6px 8px 6px 26px;
+  padding: 6px 8px 6px 56px;
   border-radius: 6px;
   cursor: pointer;
 }
@@ -380,6 +491,19 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.mailReading__actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+
+.mailReading__cleaningNotice {
+  font-size: 10.5px;
+  color: #7fb5ff;
+  padding: 0 4px;
+  margin-bottom: 8px;
 }
 
 .mailReading__translateBtn {

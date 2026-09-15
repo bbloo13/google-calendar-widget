@@ -10,7 +10,9 @@
   },
   "dependencies": {
     "google-auth-library": "^9.15.0",
-    "googleapis": "^144.0.0"
+    "googleapis": "^144.0.0",
+    "imapflow": "^2.0.3",
+    "mailparser": "^3.9.26"
   },
   "devDependencies": {
     "electron": "^32.2.0"
