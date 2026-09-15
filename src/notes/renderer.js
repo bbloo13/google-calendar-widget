@@ -1,3 +1,23 @@
+// A themed toast instead of the OS's own alert() dialog, which looks jarring
+// next to this dark UI — one element, reused for every message rather than
+// stacking multiple. Same component as the main widget's (see its
+// renderer.js), duplicated here since the two windows load separately.
+let toastTimer = null;
+function showToast(message, { danger = false, duration = 4000 } = {}) {
+  let toastEl = document.getElementById('toast');
+  if (!toastEl) {
+    toastEl = document.createElement('div');
+    toastEl.id = 'toast';
+    toastEl.className = 'toast';
+    document.body.appendChild(toastEl);
+  }
+  toastEl.textContent = message;
+  toastEl.classList.toggle('is-danger', danger);
+  toastEl.classList.add('is-visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toastEl.classList.remove('is-visible'), duration);
+}
+
 const categoryProgressBar = createProgressBar(document.getElementById('categoryProgressBar'));
 const noteProgressBar = createProgressBar(document.getElementById('noteProgressBar'));
 const editorProgressBar = createProgressBar(document.getElementById('editorProgressBar'));
@@ -995,7 +1015,7 @@ function showAttachmentChoice(att, chip, icon) {
     chip.classList.add('is-downloading');
     const res = await window.notesAPI.previewAttachment(att.id);
     chip.classList.remove('is-downloading');
-    if (!res.ok) alert(`미리보기 실패: ${res.error}`);
+    if (!res.ok) showToast(`미리보기 실패: ${res.error}`, { danger: true });
   });
 
   const downloadBtn = document.createElement('button');
@@ -1070,7 +1090,7 @@ function startRenameAttachment(att, chip, nameEl) {
       if (res.ok) {
         att.name = res.attachment.name;
       } else {
-        alert(`파일명 수정 실패: ${res.error}`);
+        showToast(`파일명 수정 실패: ${res.error}`, { danger: true });
       }
     }
     renderAttachments(); // rebuilds chips from currentAttachments, so this also covers the failure path
@@ -1097,7 +1117,7 @@ async function removeAttachmentFlow(fileId, chip) {
   const res = await window.notesAPI.deleteAttachment(fileId);
   if (!res.ok) {
     chip.classList.remove('is-downloading');
-    alert(`삭제 실패: ${res.error}`);
+    showToast(`삭제 실패: ${res.error}`, { danger: true });
     return;
   }
   if (selectedNoteId !== noteId) return; // moved to a different note while this was deleting
@@ -1116,7 +1136,7 @@ async function downloadAttachmentFlow(att, chip, icon) {
   setTimeout(() => {
     icon.textContent = attachmentIcon(att.mimeType);
   }, 1200);
-  if (!res.ok) alert(`다운로드 실패: ${res.error}`);
+  if (!res.ok) showToast(`다운로드 실패: ${res.error}`, { danger: true });
 }
 
 function fileToBase64(file) {
@@ -1145,7 +1165,7 @@ async function uploadAttachmentFile(file, name) {
     attachmentsCache.set(noteId, currentAttachments);
     renderAttachments();
   } else {
-    alert(`첨부파일 업로드 실패: ${res.error}`);
+    showToast(`첨부파일 업로드 실패: ${res.error}`, { danger: true });
   }
 }
 
@@ -1341,7 +1361,7 @@ addToCalendarBtn.addEventListener('click', async () => {
       if (selectedNoteId) saveStateEl.textContent = `저장됨 ${formatTime(new Date().toISOString())}`;
     }, 2000);
   } else {
-    alert(`일정 추가 실패: ${res.error}`);
+    showToast(`일정 추가 실패: ${res.error}`, { danger: true });
   }
 });
 

@@ -13,6 +13,36 @@ html, body {
   overflow: hidden;
 }
 
+/* A themed stand-in for alert() — see showToast() in renderer.js. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  background: #232329;
+  color: #e8e8ea;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.toast.is-danger {
+  border-color: rgba(255, 100, 100, 0.3);
+  color: #ff8787;
+}
+
 .notes {
   width: 100%;
   height: 100%;
