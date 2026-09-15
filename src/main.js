@@ -5,6 +5,8 @@ const https = require('https');
 const { fetchAgenda, createEvent, updateEvent, deleteEvent } = require('./calendarService');
 const { withAuthRetry } = require('../auth/googleAuth');
 const drive = require('./driveService');
+const gmail = require('./gmailService');
+const gemini = require('./geminiService');
 
 // Without this, every single Calendar/Drive API call opened a brand-new TLS
 // connection before it could even start — reusing connections cuts a lot of
@@ -12,10 +14,11 @@ const drive = require('./driveService');
 https.globalAgent.keepAlive = true;
 
 const REFRESH_INTERVAL_MS = 20 * 60 * 1000; // 20 minutes
+const MAIL_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 const COLLAPSED_WIDTH = 300;
-const GRID_PANEL_WIDTH = 340;
+const SIDE_PANEL_WIDTH = 340; // shared by the grid and mail panels — they're mutually exclusive, never both open
 const PANEL_GAP = 8;
-const EXPANDED_WIDTH = COLLAPSED_WIDTH + GRID_PANEL_WIDTH + PANEL_GAP;
+const EXPANDED_WIDTH = COLLAPSED_WIDTH + SIDE_PANEL_WIDTH + PANEL_GAP;
 const WINDOW_HEIGHT = 420;
 
 let mainWindow;
@@ -77,18 +80,15 @@ function defaultPosition() {
 }
 
 /**
- * Resizes the window for the grid panel being open/closed, anchoring the
- * top-right corner (the main widget's edge never moves). This is a single
- * instant jump, not animated here — the visible motion is owned entirely
- * by the .gridPanel CSS opacity/margin transition in the renderer, which
- * calls this before revealing the panel (so the extra space is already
- * there, still transparent, when the fade-in starts) and after hiding it
- * (so the space is already invisible when it collapses again). Animating
- * the OS window bounds on a timer here as well fought the CSS transition's
- * own clock and read as jittery — one system owning the motion is smoother
- * than two racing each other.
+ * Resizes the window for a side panel (grid or mail) being open/closed,
+ * anchoring the top-right corner (the main widget's edge never moves). The
+ * renderer is the source of truth for whether either panel wants the space
+ * open (see setSidePanelOpen's callers) — this just gets a plain boolean.
+ * A single instant jump, not animated: the panel's own reveal is instant
+ * too (display:none/flex), so there's nothing for a window-resize animation
+ * to stay in sync with.
  */
-function resizeForGrid(open) {
+function resizeForSidePanel(open) {
   if (!mainWindow) return;
   const targetWidth = open ? EXPANDED_WIDTH : COLLAPSED_WIDTH;
   const bounds = mainWindow.getBounds();
@@ -230,6 +230,14 @@ function startAutoRefresh() {
   }, REFRESH_INTERVAL_MS);
 }
 
+let mailCheckTimer;
+function startMailAutoCheck() {
+  clearInterval(mailCheckTimer);
+  mailCheckTimer = setInterval(() => {
+    if (mainWindow) mainWindow.webContents.send('mail-check-tick');
+  }, MAIL_CHECK_INTERVAL_MS);
+}
+
 // Renderer owns which view/month is showing; main just proxies data fetches,
 // handles window resizing for the grid panel, and broadcasts refresh ticks.
 ipcMain.handle('get-list-agenda', async (_event, { view }) => {
@@ -252,8 +260,8 @@ ipcMain.handle('get-grid', async (_event, { monthOffset = 0 } = {}) => {
   }
 });
 
-ipcMain.handle('set-grid-open', (_event, open) => {
-  resizeForGrid(open);
+ipcMain.handle('set-side-panel-open', (_event, open) => {
+  resizeForSidePanel(open);
 });
 
 ipcMain.handle('open-calendar-home', (_event, dateKeyMs) => {
@@ -546,11 +554,48 @@ ipcMain.handle('notes:open-drive-folder', async () => {
   }
 });
 
+// --- Mail (Gmail-backed) ---
+// Just the one Gmail account tied to the app's own Google sign-in for now —
+// a second Gmail account (and Naver) need their own separate auth entirely,
+// see the account-list UI in the widget, which is already shaped to hold more.
+
+ipcMain.handle('mail:list-today', async () => {
+  try {
+    const summary = await withGoogleAuth((auth) => gmail.listTodayMessages(auth));
+    return { ok: true, ...summary };
+  } catch (err) {
+    console.error('Failed to list today\'s mail:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('mail:get-message', async (_event, messageId) => {
+  try {
+    const message = await withGoogleAuth((auth) => gmail.getMessage(auth, messageId));
+    return { ok: true, message };
+  } catch (err) {
+    console.error('Failed to fetch mail message:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('mail:translate', async (_event, text) => {
+  try {
+    if (!gemini.isConfigured()) return { ok: false, error: 'Gemini API 키가 설정되지 않았어요.' };
+    const translated = await gemini.translateToKorean(text);
+    return { ok: true, translated };
+  } catch (err) {
+    console.error('Failed to translate mail:', err);
+    return { ok: false, error: err.message };
+  }
+});
+
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   createWindow();
   createTray();
   startAutoRefresh();
+  startMailAutoCheck();
 
   // Quietly warm the notes backend (root-folder lookup + an authorized
   // client) in the background so opening the notes window for the first

@@ -3,7 +3,13 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('calendarAPI', {
   getListAgenda: (view) => ipcRenderer.invoke('get-list-agenda', { view }),
   getGrid: (monthOffset) => ipcRenderer.invoke('get-grid', { monthOffset }),
-  setGridOpen: (open) => ipcRenderer.invoke('set-grid-open', open),
+  // One shared window-resize channel for both side panels (the grid and
+  // mail panels are mutually exclusive and the same size, so the window
+  // just needs to know "is *a* panel open", not which one).
+  setSidePanelOpen: (open) => ipcRenderer.invoke('set-side-panel-open', open),
+  listTodayMail: () => ipcRenderer.invoke('mail:list-today'),
+  getMailMessage: (messageId) => ipcRenderer.invoke('mail:get-message', messageId),
+  translateMail: (text) => ipcRenderer.invoke('mail:translate', text),
   openCalendarHome: (dateKeyMs) => ipcRenderer.invoke('open-calendar-home', dateKeyMs),
   openNotesWindow: () => ipcRenderer.invoke('open-notes-window'),
   updateEvent: (eventId, title, description) => ipcRenderer.invoke('update-event', { eventId, title, description }),
@@ -12,5 +18,8 @@ contextBridge.exposeInMainWorld('calendarAPI', {
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   onAutoRefreshTick: (callback) => {
     ipcRenderer.on('auto-refresh-tick', () => callback());
+  },
+  onMailCheckTick: (callback) => {
+    ipcRenderer.on('mail-check-tick', () => callback());
   },
 });

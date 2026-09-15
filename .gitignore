@@ -4,6 +4,7 @@ node_modules/
 credentials.json
 token.json
 auth/.test-userdata/
+gemini-key.json
 
 # OS/editor cruft
 .DS_Store

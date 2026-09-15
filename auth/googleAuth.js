@@ -8,6 +8,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/drive.file',
+  'https://www.googleapis.com/auth/gmail.modify', // readonly + the ability to change labels (mark read) — not send/delete
 ];
 
 const CREDENTIALS_PATH = path.join(__dirname, '..', 'credentials.json');

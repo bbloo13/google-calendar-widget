@@ -21,6 +21,16 @@
       <div class="gridPanel__weeks" id="monthWeeks"></div>
     </div>
 
+    <div class="mailPanel" id="mailPanel">
+      <div class="mailPanel__nav">
+        <button class="widget__iconBtn" id="mailBackBtn" style="visibility: hidden;">‹</button>
+        <span class="mailPanel__label" id="mailLabel">메일</span>
+        <span class="widget__iconBtn" style="visibility: hidden;">‹</span>
+      </div>
+      <div class="progressBarTrack"><div class="progressBar" id="mailProgressBar"></div></div>
+      <div class="mailPanel__body" id="mailBody"></div>
+    </div>
+
     <div class="widget" id="widget">
       <header class="widget__header">
         <div class="widget__date">
@@ -43,6 +53,13 @@
               <path d="M9 1.5V4h3" stroke="currentColor" stroke-width="1.1" fill="none"/>
               <path d="M4 7h5M4 9.2h5M4 11.4h3" stroke="currentColor" stroke-width="1" stroke-linecap="round"/>
             </svg>
+          </button>
+          <button class="widget__iconBtn" id="mailToggleBtn" title="메일">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="0.5" y="2.5" width="13" height="9" rx="1" stroke="currentColor" stroke-width="1.1" fill="none"/>
+              <path d="M1 3.2 7 8l6-4.8" stroke="currentColor" stroke-width="1.1" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            <span class="widget__iconBtn__dot" id="mailUnreadDot"></span>
           </button>
           <button class="widget__iconBtn" id="addEventBtn" title="일정 추가">+</button>
           <button class="widget__iconBtn" id="refreshBtn" title="새로고침">⟳</button>

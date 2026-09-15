@@ -16,6 +16,14 @@ const prevMonthBtn = document.getElementById('prevMonthBtn');
 const nextMonthBtn = document.getElementById('nextMonthBtn');
 const gridProgressBar = createProgressBar(document.getElementById('gridProgressBar'));
 
+const mailToggleBtn = document.getElementById('mailToggleBtn');
+const mailUnreadDotEl = document.getElementById('mailUnreadDot');
+const mailPanelEl = document.getElementById('mailPanel');
+const mailBackBtn = document.getElementById('mailBackBtn');
+const mailLabelEl = document.getElementById('mailLabel');
+const mailBodyEl = document.getElementById('mailBody');
+const mailProgressBar = createProgressBar(document.getElementById('mailProgressBar'));
+
 const eventContextMenu = document.getElementById('eventContextMenu');
 const editEventMenuItem = document.getElementById('editEventMenuItem');
 const deleteEventMenuItem = document.getElementById('deleteEventMenuItem');
@@ -30,6 +38,16 @@ let selectedCellKey = null; // set when a grid day is previewed in the agenda pa
 let lastRenderedGroups = null;
 let expandedEventKey = null; // id of the event whose detail panel is expanded, if any
 let contextMenuEventId = null;
+
+// Mail panel state. Single-account-shaped for now (just the app's own Gmail
+// sign-in) — `mailAccounts` is still an array so a second Gmail account or
+// Naver later on is just another entry, not a rewrite.
+let mailOpen = false;
+let mailView = 'list'; // 'list' | 'reading'
+let mailAccounts = [{ id: 'gmail', label: 'Gmail', total: 0, unread: 0, messages: null, expanded: false }];
+let mailReadingMessage = null;
+let mailReadingAccountId = null;
+let mailReadingShowTranslated = false;
 
 /** Finds an event object (and which group holds it) across the currently rendered groups. */
 function findEvent(id) {
@@ -489,32 +507,261 @@ notesBtn.addEventListener('click', () => {
   window.calendarAPI.openNotesWindow();
 });
 
-gridToggleBtn.addEventListener('click', async () => {
-  gridOpen = !gridOpen;
-  gridToggleBtn.classList.toggle('is-active', gridOpen);
+/**
+ * Grid and mail are two mutually-exclusive side panels sharing one slot —
+ * `next` is 'grid', 'mail', or null (close whichever is open). Only resizes
+ * the OS window on an actual open-from-nothing or close-to-nothing edge;
+ * switching directly between the two panels leaves the window exactly as
+ * wide as it already was. See the comment that used to live on the old
+ * per-panel grid handler for why resize and reveal/hide are ordered the
+ * way they are around each other.
+ */
+async function setActivePanel(next) {
+  const wasOpen = gridOpen || mailOpen;
+  const willOpen = next !== null;
 
-  // setGridOpen (window resize) is an async IPC round-trip, not instant like
-  // the classList toggle — flipping is-visible before it resolves left a
-  // brief window where the panel was already flex-displayed but the OS
-  // window hadn't grown yet, so it rendered squeezed/overlapping the widget
-  // until the resize caught up and it "popped" into place. Resize (or
-  // shrink) first, then flip the CSS, so there's nothing to catch up to.
-  if (gridOpen) {
-    await window.calendarAPI.setGridOpen(gridOpen);
+  if (willOpen && !wasOpen) {
+    await window.calendarAPI.setSidePanelOpen(true);
+  }
+
+  if (gridOpen && next !== 'grid') {
+    gridPanelEl.classList.remove('is-visible');
+    gridToggleBtn.classList.remove('is-active');
+    gridOpen = false;
+  }
+  if (mailOpen && next !== 'mail') {
+    mailPanelEl.classList.remove('is-visible');
+    mailToggleBtn.classList.remove('is-active');
+    mailOpen = false;
+    mailView = 'list';
+  }
+
+  if (next === 'grid') {
+    gridOpen = true;
+    gridToggleBtn.classList.add('is-active');
     gridPanelEl.classList.add('is-visible');
     monthOffset = 0;
     await loadGrid(monthOffset);
-  } else {
-    gridPanelEl.classList.remove('is-visible');
+  } else if (next === 'mail') {
+    mailOpen = true;
+    mailToggleBtn.classList.add('is-active');
+    mailPanelEl.classList.add('is-visible');
+    await ensureMailLoaded();
+    renderMailPanel();
+  }
+
+  if (!willOpen && wasOpen) {
     // Give Chromium a chance to actually paint the hidden state before the
     // native window shrink fires — otherwise the resize can land before the
     // display:none repaint does, and it stretches the still-wide old frame
     // into the new narrow bounds for a frame, reading as an overlap/flash.
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    await window.calendarAPI.setGridOpen(gridOpen);
+    await window.calendarAPI.setSidePanelOpen(false);
     selectedCellKey = null;
     await loadList(currentView);
   }
+}
+
+gridToggleBtn.addEventListener('click', () => setActivePanel(gridOpen ? null : 'grid'));
+mailToggleBtn.addEventListener('click', () => setActivePanel(mailOpen ? null : 'mail'));
+
+function formatMailTime(dateStr) {
+  const d = new Date(dateStr);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+function updateMailUnreadDot() {
+  mailUnreadDotEl.classList.toggle('is-visible', mailAccounts.some((a) => a.unread > 0));
+}
+
+/** Re-fetches today's mail summary for every account and repaints if the panel's showing the list. Safe to call whether or not the panel is open (drives the header dot either way). */
+async function loadMailSummary() {
+  if (mailOpen) mailProgressBar.start();
+  // Single account for now — see the comment on `mailAccounts`'s declaration.
+  const account = mailAccounts[0];
+  const res = await window.calendarAPI.listTodayMail();
+  if (mailOpen) mailProgressBar.finish();
+  if (!res.ok) return;
+  if (res.email) account.label = res.email; // real address, not a generic "Gmail" — matters once there's more than one
+  account.total = res.total;
+  account.unread = res.unread;
+  account.messages = res.messages;
+  updateMailUnreadDot();
+  if (mailOpen && mailView === 'list') renderMailPanel();
+}
+
+async function ensureMailLoaded() {
+  if (mailAccounts[0].messages === null) await loadMailSummary();
+}
+
+async function openMailMessage(accountId, messageId) {
+  mailProgressBar.start();
+  const res = await window.calendarAPI.getMailMessage(messageId);
+  mailProgressBar.finish();
+  if (!res.ok) return;
+
+  const account = mailAccounts.find((a) => a.id === accountId);
+  const cachedRow = account && account.messages && account.messages.find((m) => m.id === messageId);
+  if (cachedRow && cachedRow.isUnread) {
+    cachedRow.isUnread = false;
+    account.unread = Math.max(0, account.unread - 1);
+    updateMailUnreadDot();
+  }
+
+  mailReadingAccountId = accountId;
+  mailReadingMessage = res.message;
+  mailReadingShowTranslated = false;
+  mailView = 'reading';
+  renderMailPanel();
+}
+
+async function toggleMailTranslation() {
+  const msg = mailReadingMessage;
+  if (!msg) return;
+
+  if (mailReadingShowTranslated) {
+    mailReadingShowTranslated = false;
+    renderMailReading();
+    return;
+  }
+  if (msg.translated) {
+    mailReadingShowTranslated = true;
+    renderMailReading();
+    return;
+  }
+
+  mailProgressBar.start();
+  const res = await window.calendarAPI.translateMail(msg.text);
+  mailProgressBar.finish();
+  if (!res.ok) {
+    alert(`번역 실패: ${res.error}`);
+    return;
+  }
+  msg.translated = res.translated; // cached on the message object, so flipping back and forth doesn't re-request
+  mailReadingShowTranslated = true;
+  renderMailReading();
+}
+
+function renderMailPanel() {
+  if (mailView === 'reading') {
+    renderMailReading();
+    return;
+  }
+
+  mailBackBtn.style.visibility = 'hidden';
+  mailLabelEl.textContent = '메일';
+  mailBodyEl.innerHTML = '';
+
+  for (const account of mailAccounts) {
+    const row = document.createElement('div');
+    row.className = 'mailAccount';
+
+    const toggle = document.createElement('span');
+    toggle.className = 'mailAccount__toggle';
+    if (account.messages && account.messages.length > 0) toggle.textContent = account.expanded ? '▾' : '▸';
+
+    const name = document.createElement('span');
+    name.className = 'mailAccount__name';
+    name.textContent = account.label;
+
+    row.appendChild(toggle);
+    row.appendChild(name);
+
+    if (account.unread > 0) {
+      const badge = document.createElement('span');
+      badge.className = 'mailAccount__badge';
+      badge.textContent = String(account.unread);
+      row.appendChild(badge);
+    }
+
+    row.addEventListener('click', async () => {
+      account.expanded = !account.expanded;
+      await ensureMailLoaded();
+      renderMailPanel();
+    });
+    mailBodyEl.appendChild(row);
+
+    if (!account.expanded) continue;
+
+    if (!account.messages || account.messages.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'mailPanel__empty';
+      empty.textContent = '오늘 온 메일이 없어요';
+      mailBodyEl.appendChild(empty);
+      continue;
+    }
+
+    for (const msg of account.messages) {
+      const item = document.createElement('div');
+      item.className = 'mailMessage' + (msg.isUnread ? ' is-unread' : '');
+
+      const subject = document.createElement('div');
+      subject.className = 'mailMessage__subject';
+      subject.textContent = msg.subject;
+
+      const meta = document.createElement('div');
+      meta.className = 'mailMessage__meta';
+      meta.textContent = `${msg.from} · ${formatMailTime(msg.date)}`;
+
+      item.appendChild(subject);
+      item.appendChild(meta);
+      item.addEventListener('click', (e) => {
+        e.stopPropagation(); // don't also toggle the account row's expand state
+        openMailMessage(account.id, msg.id);
+      });
+      mailBodyEl.appendChild(item);
+    }
+  }
+}
+
+function renderMailReading() {
+  mailBackBtn.style.visibility = 'visible';
+  mailLabelEl.textContent = '메일';
+  mailBodyEl.innerHTML = '';
+  const msg = mailReadingMessage;
+  if (!msg) return;
+
+  const subject = document.createElement('div');
+  subject.className = 'mailReading__subject';
+  subject.textContent = msg.subject;
+
+  const fromRow = document.createElement('div');
+  fromRow.className = 'mailReading__fromRow';
+
+  const from = document.createElement('span');
+  from.className = 'mailReading__from';
+  from.textContent = `${msg.from} · ${formatMailTime(msg.date)}`;
+
+  const translateBtn = document.createElement('button');
+  translateBtn.className = 'mailReading__translateBtn';
+  translateBtn.textContent = mailReadingShowTranslated ? '원문 보기' : '번역';
+  translateBtn.addEventListener('click', toggleMailTranslation);
+
+  fromRow.appendChild(from);
+  fromRow.appendChild(translateBtn);
+
+  mailBodyEl.appendChild(subject);
+  mailBodyEl.appendChild(fromRow);
+
+  if (msg.hasAttachment) {
+    const notice = document.createElement('div');
+    notice.className = 'mailReading__attachmentNotice';
+    notice.textContent = '첨부파일이 있어요 — 직접 확인해 주세요.';
+    mailBodyEl.appendChild(notice);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'mailReading__body';
+  const shownText = mailReadingShowTranslated && msg.translated ? msg.translated : msg.text;
+  body.textContent = shownText || '(내용 없음)';
+  mailBodyEl.appendChild(body);
+}
+
+mailBackBtn.addEventListener('click', () => {
+  mailView = 'list';
+  mailReadingMessage = null;
+  renderMailPanel();
 });
 
 function setActiveView(view) {
@@ -547,9 +794,11 @@ nextMonthBtn.addEventListener('click', () => {
 });
 
 window.calendarAPI.onAutoRefreshTick(refreshAgenda);
+window.calendarAPI.onMailCheckTick(loadMailSummary);
 
 renderDate();
 loadList(currentView);
+loadMailSummary();
 
 // Keep the date/weekday fresh, and re-fetch the agenda once the day actually
 // rolls over — otherwise "오늘/내일" (or the week's day-of-week grouping) kept
