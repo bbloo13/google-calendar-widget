@@ -101,9 +101,17 @@ async function withClient(account, fn) {
   }
 }
 
+// imapflow formats a Date for IMAP's date-only SEARCH criteria by reading
+// its *UTC* date (`date.toISOString().slice(0, 10)`) — a plain local
+// midnight (new Date(y, m, d)) for a positive UTC offset like KST (+9) is
+// still mid-afternoon the previous day in UTC, so that read always comes
+// back "yesterday" and the server searches SINCE a day too early, no
+// matter what time it actually is locally. Building at UTC midnight of the
+// local calendar date instead keeps the date toISOString() reads in sync
+// with what "today" means locally, regardless of the offset direction.
 function startOfToday() {
   const now = new Date();
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
 }
 
 /** Today's messages for one Naver account: envelope + flags only, same shape as gmailService's listTodayMessages. */

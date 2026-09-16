@@ -427,6 +427,11 @@ html, body {
   text-align: center;
 }
 
+.mailAccount__badge--error {
+  background: rgba(255, 100, 100, 0.16);
+  color: #ff8787;
+}
+
 .mailMessage {
   display: flex;
   flex-direction: column;

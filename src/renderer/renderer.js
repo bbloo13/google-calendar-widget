@@ -619,10 +619,6 @@ async function loadMailSummary() {
   if (!res.ok) return;
 
   for (const accountRes of res.accounts) {
-    if (!accountRes.ok) {
-      console.error(`Mail account '${accountRes.accountKey}' failed to load:`, accountRes.error);
-      continue;
-    }
     let account = mailAccounts.find((a) => a.id === accountRes.accountKey);
     if (!account) {
       account = {
@@ -634,6 +630,17 @@ async function loadMailSummary() {
       mailAccounts.push(account);
     }
     if (accountRes.email) account.label = accountRes.email; // real address, not a generic placeholder — matters once there's more than one
+
+    if (!accountRes.ok) {
+      // Still add/keep the row instead of skipping it — an account that
+      // fails on its very first load (e.g. an expired Naver app password)
+      // would otherwise never appear at all, which just looks like the
+      // account vanished with no explanation.
+      console.error(`Mail account '${accountRes.accountKey}' failed to load:`, accountRes.error);
+      account.error = accountRes.error;
+      continue;
+    }
+    account.error = null;
     account.total = accountRes.total;
     account.unread = accountRes.unread;
     account.messages = accountRes.messages;
@@ -783,7 +790,12 @@ function renderAccountRow(account) {
   row.appendChild(toggle);
   row.appendChild(name);
 
-  if (account.unread > 0) {
+  if (account.error) {
+    const errBadge = document.createElement('span');
+    errBadge.className = 'mailAccount__badge mailAccount__badge--error';
+    errBadge.textContent = '연결 실패';
+    row.appendChild(errBadge);
+  } else if (account.unread > 0) {
     const badge = document.createElement('span');
     badge.className = 'mailAccount__badge';
     badge.textContent = String(account.unread);
@@ -798,6 +810,14 @@ function renderAccountRow(account) {
   mailBodyEl.appendChild(row);
 
   if (!account.expanded) return;
+
+  if (account.error) {
+    const errMsg = document.createElement('div');
+    errMsg.className = 'mailPanel__empty mailPanel__empty--message';
+    errMsg.textContent = `연결 실패: ${account.error}`;
+    mailBodyEl.appendChild(errMsg);
+    return;
+  }
 
   if (!account.messages || account.messages.length === 0) {
     const empty = document.createElement('div');
