@@ -9,6 +9,26 @@ const gmail = require('./gmailService');
 const naver = require('./naverService');
 const gemini = require('./geminiService');
 
+// Without this, a second launch (e.g. the Windows startup shortcut firing
+// while a manual launch is still starting up, or right after a reboot)
+// would run fully independently alongside the first — both instances
+// reading and writing the same userData files (mail-accounts.json,
+// naver-accounts.json, tokens) with no coordination between them. That's
+// how an account could intermittently fail to load with no error at all:
+// not lost data, just two processes racing over the same file. Whichever
+// instance grabs the lock first keeps running; every later launch attempt
+// quits immediately and just re-shows the first instance's window instead.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.focus();
+  });
+}
+
 // Without this, every single Calendar/Drive API call opened a brand-new TLS
 // connection before it could even start — reusing connections cuts a lot of
 // the per-click latency the notes window and widget were both feeling.

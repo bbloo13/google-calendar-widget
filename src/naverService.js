@@ -16,7 +16,16 @@ function listAccounts(userDataDir) {
   try {
     const raw = fs.readFileSync(getAccountsPath(userDataDir), 'utf-8');
     return JSON.parse(raw).accounts || [];
-  } catch (_) {
+  } catch (err) {
+    // ENOENT (no file yet) is the normal state before any account has ever
+    // been added — not worth logging. Anything else (a race with a
+    // concurrent write, bad permissions, corrupted JSON) is worth surfacing
+    // instead of silently returning an empty list that looks identical to
+    // "no accounts", which is exactly what made a previous read glitch here
+    // look like a saved account had vanished.
+    if (err.code !== 'ENOENT') {
+      console.error(`Failed to read Naver accounts from ${getAccountsPath(userDataDir)}:`, err.message);
+    }
     return [];
   }
 }
