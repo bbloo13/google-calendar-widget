@@ -3,7 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const { fetchAgenda, createEvent, updateEvent, deleteEvent } = require('./calendarService');
-const { withAuthRetry, addMailAccount, listMailAccountKeys } = require('../auth/googleAuth');
+const { getAuthorizedClient, withAuthRetry, addMailAccount, listMailAccountKeys } = require('../auth/googleAuth');
 const drive = require('./driveService');
 const gmail = require('./gmailService');
 const naver = require('./naverService');
@@ -634,7 +634,23 @@ ipcMain.handle('mail:get-message', async (_event, { provider, accountKey, messag
 
 ipcMain.handle('mail:add-account', async () => {
   try {
-    const accountKey = await addMailAccount(app.getPath('userData'));
+    const userDataDir = app.getPath('userData');
+    const accountKey = await addMailAccount(userDataDir, async (newAuth) => {
+      const newEmail = (await gmail.getEmailAddress(newAuth)).toLowerCase();
+      for (const key of ['primary', ...listMailAccountKeys(userDataDir)]) {
+        // Deliberately not withGoogleAuth's self-heal: an existing account
+        // whose token has died shouldn't pop its own surprise login window
+        // (or fail this add) just because it's being compared against —
+        // if it can't answer, it simply can't be the duplicate.
+        let email;
+        try {
+          email = await gmail.getEmailAddress(await getAuthorizedClient(userDataDir, key));
+        } catch (_) {
+          continue;
+        }
+        if (email.toLowerCase() === newEmail) throw new Error('이미 추가된 계정이에요.');
+      }
+    });
     const summary = await withGoogleAuth((auth) => gmail.listTodayMessages(auth), accountKey);
     return { ok: true, accountKey, ...summary };
   } catch (err) {

@@ -203,12 +203,24 @@ function getAuthorizedClient(userDataDir, accountKey = 'primary') {
  * Interactively adds a new mail-only Google account: picks the next unused
  * key (mail-2, mail-3, ...), runs its own loopback consent flow, and records
  * it in the registry so future sessions know to load it. Returns the new key.
+ *
+ * `verifyNew(auth)`, if given, runs after the login but before anything is
+ * registered — the Google account chooser will happily sign in an account
+ * that's already here, and only the caller knows how to tell (it needs the
+ * signed-in address). If it throws, the token that login just wrote is
+ * dropped again so a rejected account leaves nothing behind.
  */
-async function addMailAccount(userDataDir) {
+async function addMailAccount(userDataDir, verifyNew) {
   const existing = listMailAccountKeys(userDataDir);
   const nextNumber = existing.length + 2; // primary is conceptually "account 1"
   const accountKey = `mail-${nextNumber}`;
-  await getAuthorizedClient(userDataDir, accountKey); // runs the interactive login, writes the token file
+  const auth = await getAuthorizedClient(userDataDir, accountKey); // runs the interactive login, writes the token file
+  try {
+    if (verifyNew) await verifyNew(auth);
+  } catch (err) {
+    clearAuthCache(userDataDir, accountKey);
+    throw err;
+  }
   saveMailAccountKeys(userDataDir, [...existing, accountKey]);
   return accountKey;
 }

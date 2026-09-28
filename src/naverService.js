@@ -38,7 +38,7 @@ function saveAccounts(userDataDir, accounts) {
 /** Adds an account after confirming the credentials actually work (a bad password otherwise wouldn't surface until the next list-today call). */
 async function addAccount(userDataDir, email, password) {
   const accounts = listAccounts(userDataDir);
-  if (accounts.some((a) => a.email === email)) {
+  if (accounts.some((a) => a.email.toLowerCase() === email.toLowerCase())) {
     throw new Error('이미 추가된 계정이에요.');
   }
   await withClient({ email, password }, async () => {}); // throws if login fails

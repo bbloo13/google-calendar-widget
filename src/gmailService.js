@@ -34,6 +34,12 @@ function todayQueryRange() {
   return `after:${fmt(start)} before:${fmt(end)}`;
 }
 
+/** Just the signed-in account's own address — cheap way to tell which Google identity a set of credentials actually belongs to. */
+async function getEmailAddress(auth) {
+  const res = await gmailClient(auth).users.getProfile({ userId: 'me' });
+  return res.data.emailAddress;
+}
+
 /** Today's messages for this account: lightweight (headers only, no body) — enough for a list row plus the unread badge count. Also returns the account's own address, so the widget can label the row by who it actually is once there's more than one. */
 async function listTodayMessages(auth) {
   const gmail = gmailClient(auth);
@@ -138,4 +144,4 @@ async function getMessage(auth, messageId) {
   };
 }
 
-module.exports = { listTodayMessages, getMessage };
+module.exports = { getEmailAddress, listTodayMessages, getMessage };
