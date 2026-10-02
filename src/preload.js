@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('calendarAPI', {
   translateMail: (text) => ipcRenderer.invoke('mail:translate', text),
   cleanMailTable: (text) => ipcRenderer.invoke('mail:clean-table', text),
   addMailAccount: () => ipcRenderer.invoke('mail:add-account'),
+  reloginMailAccount: (accountKey) => ipcRenderer.invoke('mail:relogin-account', { accountKey }),
   addNaverAccount: (email, password) => ipcRenderer.invoke('mail:add-naver-account', { email, password }),
   openCalendarHome: (dateKeyMs) => ipcRenderer.invoke('open-calendar-home', dateKeyMs),
   openNotesWindow: () => ipcRenderer.invoke('open-notes-window'),

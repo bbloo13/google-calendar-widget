@@ -432,6 +432,17 @@ html, body {
   color: #ff8787;
 }
 
+.mailAccount__badge--action {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.mailAccount__badge--action:hover {
+  background: rgba(255, 100, 100, 0.28);
+}
+
 .mailMessage {
   display: flex;
   flex-direction: column;

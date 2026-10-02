@@ -225,6 +225,16 @@ async function addMailAccount(userDataDir, verifyNew) {
   return accountKey;
 }
 
+/** Unregisters a secondary mail account and deletes its token. Never the primary — that identity is shared with Calendar/Drive. */
+function removeMailAccount(userDataDir, accountKey) {
+  if (accountKey === 'primary') return;
+  saveMailAccountKeys(
+    userDataDir,
+    listMailAccountKeys(userDataDir).filter((key) => key !== accountKey)
+  );
+  clearAuthCache(userDataDir, accountKey);
+}
+
 function isInvalidGrantError(err) {
   return err?.response?.data?.error === 'invalid_grant' || /invalid_grant/i.test(String(err?.message || ''));
 }
@@ -260,4 +270,13 @@ async function withAuthRetry(userDataDir, fn, accountKey = 'primary') {
   }
 }
 
-module.exports = { getAuthorizedClient, withAuthRetry, addMailAccount, listMailAccountKeys, SCOPES };
+module.exports = {
+  getAuthorizedClient,
+  withAuthRetry,
+  addMailAccount,
+  removeMailAccount,
+  clearAuthCache,
+  isInvalidGrantError,
+  listMailAccountKeys,
+  SCOPES,
+};

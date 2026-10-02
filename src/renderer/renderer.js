@@ -638,13 +638,19 @@ async function loadMailSummary() {
       // account vanished with no explanation.
       console.error(`Mail account '${accountRes.accountKey}' failed to load:`, accountRes.error);
       account.error = accountRes.error;
+      account.needsLogin = !!accountRes.needsLogin;
       continue;
     }
     account.error = null;
+    account.needsLogin = false;
     account.total = accountRes.total;
     account.unread = accountRes.unread;
     account.messages = accountRes.messages;
   }
+
+  // main.js is the source of truth — an account it dropped (a duplicate it
+  // just unregistered) shouldn't linger here from an earlier load.
+  mailAccounts = mailAccounts.filter((a) => res.accounts.some((r) => r.accountKey === a.id));
 
   updateMailUnreadDot();
   if (mailOpen && mailView === 'list') renderMailPanel();
@@ -652,6 +658,26 @@ async function loadMailSummary() {
 
 async function ensureMailLoaded() {
   if (mailAccounts.length === 0) await loadMailSummary();
+}
+
+/** The only thing that opens a sign-in window for an existing mail account — clicking "다시 로그인" on an expired one. */
+async function reloginMailAccountFlow(account) {
+  mailProgressBar.start();
+  const res = await window.calendarAPI.reloginMailAccount(account.id);
+  mailProgressBar.finish();
+  if (!res.ok) {
+    showToast(`다시 로그인 실패: ${res.error}`, { danger: true, container: mailPanelEl });
+    await loadMailSummary(); // the account may have been dropped as a duplicate — resync with main.js
+    return;
+  }
+  account.label = res.email || account.label;
+  account.error = null;
+  account.needsLogin = false;
+  account.total = res.total;
+  account.unread = res.unread;
+  account.messages = res.messages;
+  updateMailUnreadDot();
+  renderMailPanel();
 }
 
 async function addMailAccountFlow() {
@@ -790,7 +816,16 @@ function renderAccountRow(account) {
   row.appendChild(toggle);
   row.appendChild(name);
 
-  if (account.error) {
+  if (account.needsLogin) {
+    const loginBtn = document.createElement('button');
+    loginBtn.className = 'mailAccount__badge mailAccount__badge--error mailAccount__badge--action';
+    loginBtn.textContent = '다시 로그인';
+    loginBtn.addEventListener('click', (e) => {
+      e.stopPropagation(); // not also an expand/collapse of the row
+      reloginMailAccountFlow(account);
+    });
+    row.appendChild(loginBtn);
+  } else if (account.error) {
     const errBadge = document.createElement('span');
     errBadge.className = 'mailAccount__badge mailAccount__badge--error';
     errBadge.textContent = '연결 실패';
@@ -814,7 +849,9 @@ function renderAccountRow(account) {
   if (account.error) {
     const errMsg = document.createElement('div');
     errMsg.className = 'mailPanel__empty mailPanel__empty--message';
-    errMsg.textContent = `연결 실패: ${account.error}`;
+    errMsg.textContent = account.needsLogin
+      ? '로그인이 만료됐어요. "다시 로그인"을 눌러주세요.'
+      : `연결 실패: ${account.error}`;
     mailBodyEl.appendChild(errMsg);
     return;
   }

@@ -1,6 +1,6 @@
 {
   "name": "calendar-widget",
-  "version": "1.0.0",
+  "version": "20261002",
   "description": "Frameless desktop calendar widget backed by Google Calendar",
   "private": true,
   "main": "src/main.js",

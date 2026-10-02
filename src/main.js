@@ -3,7 +3,15 @@ const path = require('path');
 const fs = require('fs');
 const https = require('https');
 const { fetchAgenda, createEvent, updateEvent, deleteEvent } = require('./calendarService');
-const { getAuthorizedClient, withAuthRetry, addMailAccount, listMailAccountKeys } = require('../auth/googleAuth');
+const {
+  getAuthorizedClient,
+  withAuthRetry,
+  addMailAccount,
+  removeMailAccount,
+  clearAuthCache,
+  isInvalidGrantError,
+  listMailAccountKeys,
+} = require('../auth/googleAuth');
 const drive = require('./driveService');
 const gmail = require('./gmailService');
 const naver = require('./naverService');
@@ -576,6 +584,40 @@ ipcMain.handle('notes:open-drive-folder', async () => {
 });
 
 // --- Mail (Gmail + Naver) ---
+// Mail loading never opens a sign-in window on its own: when a Gmail token
+// has expired (every ~7 days while the OAuth app is in "Testing" mode) the
+// account just shows as needing a re-login, and signing in again happens
+// only when the user asks for it (mail:relogin-account) — a background
+// refresh, an hourly check or opening a message popping a browser window
+// at an arbitrary moment (or several at once, for several accounts) is worse
+// than a row that says what's wrong. Calendar/Drive still self-heal via
+// withGoogleAuth; that is the once-a-week prompt.
+function withMailAuth(fn, accountKey) {
+  return getAuthorizedClient(app.getPath('userData'), accountKey).then(fn);
+}
+
+// key -> last address seen for it, so an expired account can still be
+// labeled by who it is instead of an internal key like "mail-2".
+function mailLabelsPath() {
+  return path.join(app.getPath('userData'), 'mail-labels.json');
+}
+function recallMailLabel(accountKey) {
+  try {
+    return JSON.parse(fs.readFileSync(mailLabelsPath(), 'utf-8'))[accountKey];
+  } catch (_) {
+    return undefined;
+  }
+}
+function rememberMailLabel(accountKey, email) {
+  if (!email || recallMailLabel(accountKey) === email) return;
+  let labels = {};
+  try {
+    labels = JSON.parse(fs.readFileSync(mailLabelsPath(), 'utf-8'));
+  } catch (_) {}
+  labels[accountKey] = email;
+  fs.writeFileSync(mailLabelsPath(), JSON.stringify(labels, null, 2));
+}
+
 // Gmail: 'primary' is the original single-account identity (shared with
 // Calendar/Drive); any others are mail-only accounts added via
 // mail:add-account, tracked in mail-accounts.json (see googleAuth.js).
@@ -587,17 +629,26 @@ ipcMain.handle('mail:list-today', async () => {
   const userDataDir = app.getPath('userData');
   const gmailKeys = ['primary', ...listMailAccountKeys(userDataDir)];
 
-  const gmailResults = Promise.all(
-    gmailKeys.map(async (accountKey) => {
-      try {
-        const summary = await withGoogleAuth((auth) => gmail.listTodayMessages(auth), accountKey);
-        return { ok: true, provider: 'gmail', accountKey, ...summary };
-      } catch (err) {
-        console.error(`Failed to list today's mail for '${accountKey}':`, err);
-        return { ok: false, provider: 'gmail', accountKey, error: err.message };
-      }
-    })
-  );
+  const listGmail = async (accountKey) => {
+    try {
+      const summary = await withMailAuth((auth) => gmail.listTodayMessages(auth), accountKey);
+      rememberMailLabel(accountKey, summary.email);
+      return { ok: true, provider: 'gmail', accountKey, ...summary };
+    } catch (err) {
+      console.error(`Failed to list today's mail for '${accountKey}':`, err);
+      const needsLogin = isInvalidGrantError(err);
+      return {
+        ok: false,
+        provider: 'gmail',
+        accountKey,
+        // An expired account can't say who it is — fall back to the address it had last time.
+        email: recallMailLabel(accountKey),
+        needsLogin,
+        error: needsLogin ? '로그인이 만료됐어요' : err.message,
+      };
+    }
+  };
+  const gmailResults = Promise.all(gmailKeys.map(listGmail));
 
   const naverResults = Promise.all(
     naver.listAccounts(userDataDir).map(async (account) => {
@@ -611,7 +662,27 @@ ipcMain.handle('mail:list-today', async () => {
     })
   );
 
-  const accounts = [...(await gmailResults), ...(await naverResults)];
+  // The same Google identity can end up under two keys (re-signing in to a
+  // dead secondary slot and picking the primary's address, say) — keep the
+  // first, and unregister the later one so it doesn't reappear next launch.
+  // Order is primary first, then secondaries as they were added, so the
+  // primary can never be the one dropped.
+  const seenGmail = new Set();
+  const gmailAccounts = [];
+  for (const result of await gmailResults) {
+    if (result.ok) {
+      const email = result.email.toLowerCase();
+      if (seenGmail.has(email)) {
+        console.warn(`'${result.accountKey}' is a duplicate of an earlier Gmail account (${email}) — removing it.`);
+        removeMailAccount(userDataDir, result.accountKey);
+        continue;
+      }
+      seenGmail.add(email);
+    }
+    gmailAccounts.push(result);
+  }
+
+  const accounts = [...gmailAccounts, ...(await naverResults)];
   return { ok: true, accounts };
 });
 
@@ -623,38 +694,73 @@ ipcMain.handle('mail:get-message', async (_event, { provider, accountKey, messag
       if (!account) throw new Error('네이버 계정을 찾을 수 없어요.');
       message = await naver.getMessage(account, messageId);
     } else {
-      message = await withGoogleAuth((auth) => gmail.getMessage(auth, messageId), accountKey);
+      message = await withMailAuth((auth) => gmail.getMessage(auth, messageId), accountKey);
     }
     return { ok: true, message };
   } catch (err) {
     console.error('Failed to fetch mail message:', err);
+    return { ok: false, error: isInvalidGrantError(err) ? '로그인이 만료됐어요. 계정 행에서 다시 로그인해 주세요.' : err.message };
+  }
+});
+
+// Who a Gmail account is, without ever opening a sign-in window: ask Google
+// if its token still works, else fall back to the address remembered from
+// the last successful load (an expired account can still be a duplicate).
+async function knownMailEmail(accountKey) {
+  try {
+    return await withMailAuth((auth) => gmail.getEmailAddress(auth), accountKey);
+  } catch (_) {
+    return recallMailLabel(accountKey);
+  }
+}
+
+// Throws if `email` is already the address of a Gmail account other than `exceptKey`.
+async function assertNotDuplicateGmail(email, exceptKey) {
+  const target = email.toLowerCase();
+  for (const key of ['primary', ...listMailAccountKeys(app.getPath('userData'))]) {
+    if (key === exceptKey) continue;
+    const existing = await knownMailEmail(key);
+    if (existing && existing.toLowerCase() === target) throw new Error('이미 추가된 계정이에요.');
+  }
+}
+
+ipcMain.handle('mail:add-account', async () => {
+  try {
+    const accountKey = await addMailAccount(app.getPath('userData'), async (newAuth) => {
+      await assertNotDuplicateGmail(await gmail.getEmailAddress(newAuth), null);
+    });
+    const summary = await withMailAuth((auth) => gmail.listTodayMessages(auth), accountKey);
+    rememberMailLabel(accountKey, summary.email);
+    return { ok: true, accountKey, ...summary };
+  } catch (err) {
+    console.error('Failed to add mail account:', err);
     return { ok: false, error: err.message };
   }
 });
 
-ipcMain.handle('mail:add-account', async () => {
+// The one place a mail account's sign-in window opens: the user clicking
+// "다시 로그인" on an expired account's row.
+ipcMain.handle('mail:relogin-account', async (_event, { accountKey }) => {
+  const userDataDir = app.getPath('userData');
   try {
-    const userDataDir = app.getPath('userData');
-    const accountKey = await addMailAccount(userDataDir, async (newAuth) => {
-      const newEmail = (await gmail.getEmailAddress(newAuth)).toLowerCase();
-      for (const key of ['primary', ...listMailAccountKeys(userDataDir)]) {
-        // Deliberately not withGoogleAuth's self-heal: an existing account
-        // whose token has died shouldn't pop its own surprise login window
-        // (or fail this add) just because it's being compared against —
-        // if it can't answer, it simply can't be the duplicate.
-        let email;
-        try {
-          email = await gmail.getEmailAddress(await getAuthorizedClient(userDataDir, key));
-        } catch (_) {
-          continue;
-        }
-        if (email.toLowerCase() === newEmail) throw new Error('이미 추가된 계정이에요.');
+    clearAuthCache(userDataDir, accountKey);
+    const auth = await getAuthorizedClient(userDataDir, accountKey); // interactive sign-in
+    const email = await gmail.getEmailAddress(auth);
+    if (accountKey !== 'primary') {
+      try {
+        await assertNotDuplicateGmail(email, accountKey);
+      } catch (err) {
+        // This slot just signed in as an address another account already
+        // has — it's a duplicate, so drop it rather than keep two.
+        removeMailAccount(userDataDir, accountKey);
+        throw new Error('이미 추가된 다른 계정과 같은 계정이라 이 항목은 삭제했어요.');
       }
-    });
-    const summary = await withGoogleAuth((auth) => gmail.listTodayMessages(auth), accountKey);
+    }
+    const summary = await gmail.listTodayMessages(auth);
+    rememberMailLabel(accountKey, summary.email);
     return { ok: true, accountKey, ...summary };
   } catch (err) {
-    console.error('Failed to add mail account:', err);
+    console.error(`Failed to re-login mail account '${accountKey}':`, err);
     return { ok: false, error: err.message };
   }
 });
