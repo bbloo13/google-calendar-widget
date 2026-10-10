@@ -109,6 +109,24 @@ function defaultPosition() {
 }
 
 /**
+ * A saved position can point at a monitor that's no longer attached (e.g. an
+ * unplugged second display), which leaves the widget running but invisible.
+ * Keep the saved spot only if a usable chunk of the window still overlaps a
+ * currently attached display; otherwise return null so the caller falls back
+ * to defaultPosition() on the primary one.
+ */
+function positionIfOnScreen(saved) {
+  if (!saved || typeof saved.x !== 'number' || typeof saved.y !== 'number') return null;
+  const MIN_VISIBLE = 120;
+  const onScreen = screen.getAllDisplays().some(({ workArea: a }) => {
+    const overlapW = Math.min(saved.x + COLLAPSED_WIDTH, a.x + a.width) - Math.max(saved.x, a.x);
+    const overlapH = Math.min(saved.y + WINDOW_HEIGHT, a.y + a.height) - Math.max(saved.y, a.y);
+    return overlapW >= MIN_VISIBLE && overlapH >= MIN_VISIBLE;
+  });
+  return onScreen ? saved : null;
+}
+
+/**
  * Resizes the window for a side panel (grid or mail) being open/closed,
  * anchoring the top-right corner (the main widget's edge never moves). The
  * renderer is the source of truth for whether either panel wants the space
@@ -127,7 +145,7 @@ function resizeForSidePanel(open) {
 }
 
 function createWindow() {
-  const saved = loadSavedPosition() || defaultPosition();
+  const saved = positionIfOnScreen(loadSavedPosition()) || defaultPosition();
 
   mainWindow = new BrowserWindow({
     width: COLLAPSED_WIDTH,
