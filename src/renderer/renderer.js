@@ -80,7 +80,7 @@ const MAIL_PROVIDERS = [
   { id: 'gmail', label: 'Gmail' },
   { id: 'naver', label: 'Naver' },
 ];
-let mailProviderExpanded = { gmail: true, naver: false };
+let mailProviderExpanded = { gmail: true, naver: true };
 
 /** Finds an event object (and which group holds it) across the currently rendered groups. */
 function findEvent(id) {
