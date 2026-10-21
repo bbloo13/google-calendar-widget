@@ -69,6 +69,37 @@ function showAddEventPopup({ title = '', description = '' } = {}) {
       timeField.style.display = allDayInput.checked ? 'none' : 'flex';
     });
 
+    // Google rejects a timed event whose end isn't after its start ("The
+    // specified time range is empty"), so the end time follows the start the
+    // way the end date does: one hour later by default, capped at 23:59 so it
+    // never wraps past midnight. "HH:MM" strings compare correctly as text.
+    const toMinutes = (t) => {
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+    const oneHourAfter = (t) => {
+      const n = Math.min(toMinutes(t) + 60, 23 * 60 + 59);
+      return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+    };
+    const endNotAfterStartSameDay = () =>
+      endDateInput.value === dateInput.value && endTimeInput.value <= startTimeInput.value;
+
+    // Once the user sets the end time themselves it stops tracking the start
+    // — it's only corrected if it would end up at or before the start.
+    let endTimeEdited = false;
+    startTimeInput.addEventListener('change', () => {
+      if (!startTimeInput.value) return;
+      if (!endTimeEdited || !endTimeInput.value || endNotAfterStartSameDay()) {
+        endTimeInput.value = oneHourAfter(startTimeInput.value);
+      }
+    });
+    endTimeInput.addEventListener('change', () => {
+      endTimeEdited = !!endTimeInput.value; // clearing it hands control back to the start time
+      if (endTimeInput.value && startTimeInput.value && endNotAfterStartSameDay()) {
+        endTimeInput.value = oneHourAfter(startTimeInput.value);
+      }
+    });
+
     const finish = (result) => {
       overlay.remove();
       document.removeEventListener('keydown', onKeydown);
@@ -91,7 +122,10 @@ function showAddEventPopup({ title = '', description = '' } = {}) {
       const payload = { title: finalTitle, date, endDate, description };
       if (!allDayInput.checked) {
         payload.time = startTimeInput.value || '09:00';
-        payload.endTime = endTimeInput.value || payload.time;
+        payload.endTime = endTimeInput.value || oneHourAfter(payload.time);
+        // Covers what the live handlers can't see, e.g. a multi-day range
+        // narrowed back to a single day after the times were already set.
+        if (endDate === date && payload.endTime <= payload.time) payload.endTime = oneHourAfter(payload.time);
       }
       finish(payload);
     });
