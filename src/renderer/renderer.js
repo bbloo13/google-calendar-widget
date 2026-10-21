@@ -504,22 +504,24 @@ async function loadGrid(offset) {
 }
 
 /**
- * Re-fetches whatever's currently on screen (list, the grid too if it's
- * open, and mail — there's no separate mail-only refresh control, so the
- * one refresh button covers it too). Used by the manual refresh button, the
- * 20-minute auto-refresh timer, and after any edit the widget itself makes
+ * Re-fetches the calendar side of whatever's on screen (list, the grid too
+ * if it's open). Used by the manual refresh button, the 20-minute
+ * auto-refresh timer, and after any edit the widget itself makes
  * (rename/delete/description) — a local DOM patch alone wouldn't reach the
- * month grid's bars/dots.
+ * month grid's bars/dots. Mail is deliberately not in here: reloading every
+ * account (several API round trips each) after a calendar edit or on every
+ * 20-minute tick was wasted work that also held those actions up; mail has
+ * its own hourly check, plus the refresh button below.
  */
 async function refreshAgenda() {
   await loadList(currentView);
   if (gridOpen) await loadGrid(monthOffset);
-  await loadMailSummary();
 }
 
+// There's no separate mail-only refresh control, so the one button covers both.
 refreshBtn.addEventListener('click', async () => {
   refreshBtn.classList.add('spinning');
-  await refreshAgenda();
+  await Promise.all([refreshAgenda(), loadMailSummary()]);
   setTimeout(() => refreshBtn.classList.remove('spinning'), 400);
 });
 

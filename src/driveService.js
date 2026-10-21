@@ -1,4 +1,5 @@
-const { google } = require('googleapis');
+// Just this API's own module, not the googleapis root — see calendarService.js for why.
+const { drive: googleDrive } = require('googleapis/build/src/apis/drive');
 const { Readable } = require('stream');
 
 const ROOT_FOLDER_NAME = 'Calendar Widget 메모';
@@ -13,7 +14,7 @@ let cachedDrive = null;
 let cachedDriveAuth = null;
 function driveClient(auth) {
   if (!cachedDrive || cachedDriveAuth !== auth) {
-    cachedDrive = google.drive({ version: 'v3', auth });
+    cachedDrive = googleDrive({ version: 'v3', auth });
     cachedDriveAuth = auth;
   }
   return cachedDrive;

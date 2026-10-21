@@ -1,4 +1,6 @@
-const { google } = require('googleapis');
+// Just the Calendar API's own module: requiring the googleapis root loads all ~300 APIs
+// (~1,700 files, most of this app's startup module-load time) before the window can open.
+const { calendar: googleCalendar } = require('googleapis/build/src/apis/calendar');
 const { withAuthRetry } = require('../auth/googleAuth');
 
 const WEEKDAYS_KO = ['일', '월', '화', '수', '목', '금', '토'];
@@ -14,7 +16,7 @@ let cachedCalendar = null;
 let cachedCalendarAuth = null;
 function calendarClient(auth) {
   if (!cachedCalendar || cachedCalendarAuth !== auth) {
-    cachedCalendar = google.calendar({ version: 'v3', auth });
+    cachedCalendar = googleCalendar({ version: 'v3', auth });
     cachedCalendarAuth = auth;
   }
   return cachedCalendar;

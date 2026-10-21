@@ -1,4 +1,5 @@
-const { google } = require('googleapis');
+// Just this API's own module, not the googleapis root — see calendarService.js for why.
+const { gmail: googleGmail } = require('googleapis/build/src/apis/gmail');
 const { stripHtml, looksLikeHtml, hasTable, normalizeWhitespace } = require('./mailTextUtils');
 
 // Keyed by the auth object itself rather than one shared slot — with several
@@ -9,7 +10,7 @@ const { stripHtml, looksLikeHtml, hasTable, normalizeWhitespace } = require('./m
 const gmailClients = new WeakMap();
 function gmailClient(auth) {
   if (!gmailClients.has(auth)) {
-    gmailClients.set(auth, google.gmail({ version: 'v1', auth }));
+    gmailClients.set(auth, googleGmail({ version: 'v1', auth }));
   }
   return gmailClients.get(auth);
 }
