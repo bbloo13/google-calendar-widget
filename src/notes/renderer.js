@@ -832,13 +832,6 @@ function lineForNode(node) {
   return null;
 }
 
-/** Walks up from the selection to the direct line-<div> it's in (a child of contentArea). */
-function getCurrentLine() {
-  const sel = document.getSelection();
-  if (!sel || sel.rangeCount === 0) return null;
-  return lineForNode(sel.getRangeAt(0).startContainer);
-}
-
 /**
  * Every line-<div> the current selection spans, start through end inclusive
  * (just the one line for a collapsed cursor) — so the strike toggle below

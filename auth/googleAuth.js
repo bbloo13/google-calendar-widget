@@ -278,5 +278,4 @@ module.exports = {
   clearAuthCache,
   isInvalidGrantError,
   listMailAccountKeys,
-  SCOPES,
 };
