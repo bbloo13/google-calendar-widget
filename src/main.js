@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, screen, shell, Tray, Menu, nativeImage, crashReporter } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const https = require('https');
@@ -55,6 +55,40 @@ let notesWindow;
 let tray;
 let refreshTimer;
 let isQuitting = false;
+
+// A tray app that goes quiet when nothing is wrong leaves nothing to look at
+// when it does go wrong — a crash dialog at shutdown, say, with no record of
+// what led up to it. So the events that matter here (startup, quit and
+// Windows session-end signals, any process dying) get one line each in
+// widget.log next to the other userData files, and native crash dumps are
+// kept locally (never uploaded). The log is trimmed on startup so it can't
+// grow without bound.
+const LOG_MAX_BYTES = 256 * 1024;
+function logEvent(message) {
+  try {
+    const file = path.join(app.getPath('userData'), 'widget.log');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, `${new Date().toISOString()} ${message}
+`);
+  } catch (_) {
+    // Logging must never be the thing that breaks the app.
+  }
+}
+
+function trimLog() {
+  try {
+    const file = path.join(app.getPath('userData'), 'widget.log');
+    if (fs.statSync(file).size > LOG_MAX_BYTES) {
+      fs.writeFileSync(file, fs.readFileSync(file, 'utf-8').slice(-LOG_MAX_BYTES / 2));
+    }
+  } catch (_) {
+    // No log yet, or unreadable — nothing to trim.
+  }
+}
+
+crashReporter.start({ uploadToServer: false });
+process.on('uncaughtException', (err) => logEvent(`uncaughtException: ${err && err.stack ? err.stack : err}`));
+process.on('unhandledRejection', (reason) => logEvent(`unhandledRejection: ${reason && reason.stack ? reason.stack : reason}`));
 
 function getPositionFilePath() {
   return path.join(app.getPath('userData'), 'window-position.json');
@@ -185,9 +219,22 @@ function createWindow() {
     }, 300);
   });
 
+  // Windows shutdown, restart and log-off end with a session-end signal to
+  // every window (app 'before-quit' is documented as not firing for these on
+  // Windows). The hide-to-tray handler below answers close requests with "no"
+  // like it does for the X button, so without this the app could refuse to go,
+  // get killed by Windows as hung, and show a crash dialog on the way down.
+  // Treat the signal as a real quit.
+  mainWindow.on('session-end', () => {
+    isQuitting = true;
+    logEvent('session-end (Windows is shutting down / logging off)');
+    app.quit(); // exit cleanly instead of lingering as a window-less process until Windows kills it
+  });
+
   mainWindow.on('close', (event) => {
     if (isQuitting) return;
     event.preventDefault();
+    logEvent('close request vetoed, hidden to tray');
     mainWindow.hide();
   });
 }
@@ -823,7 +870,16 @@ ipcMain.handle('mail:clean-table', async (_event, text) => {
   }
 });
 
+app.on('render-process-gone', (_event, webContents, details) => {
+  logEvent(`render-process-gone: reason=${details.reason} exitCode=${details.exitCode} url=${webContents.getURL()}`);
+});
+app.on('child-process-gone', (_event, details) => {
+  logEvent(`child-process-gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode}`);
+});
+
 app.whenReady().then(() => {
+  trimLog();
+  logEvent(`start (electron ${process.versions.electron})`);
   Menu.setApplicationMenu(null);
   createWindow();
   createTray();
@@ -844,4 +900,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   isQuitting = true;
+  logEvent('before-quit');
 });
