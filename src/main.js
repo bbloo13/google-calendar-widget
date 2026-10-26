@@ -683,6 +683,18 @@ function rememberMailLabel(accountKey, email) {
   fs.writeFileSync(mailLabelsPath(), JSON.stringify(labels, null, 2));
 }
 
+// A hiccup rather than a real problem with the account (DNS or the connection
+// itself failing right after boot/wake, a dropped socket): worth one quiet
+// retry soon, unlike a revoked login or wrong password, which won't fix itself.
+const TRANSIENT_NETWORK_CODES = [
+  'ENOTFOUND', 'EAI_AGAIN', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'ENETUNREACH', 'EHOSTUNREACH', 'EPIPE',
+];
+function isTransientNetworkError(err) {
+  if (!err) return false;
+  if (TRANSIENT_NETWORK_CODES.includes(err.code)) return true;
+  return /ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH|EHOSTUNREACH|socket hang up|socket timeout/i.test(String(err.message));
+}
+
 // Gmail: 'primary' is the original single-account identity (shared with
 // Calendar/Drive); any others are mail-only accounts added via
 // mail:add-account, tracked in mail-accounts.json (see googleAuth.js).
@@ -709,6 +721,7 @@ ipcMain.handle('mail:list-today', async () => {
         // An expired account can't say who it is — fall back to the address it had last time.
         email: recallMailLabel(accountKey),
         needsLogin,
+        transient: isTransientNetworkError(err),
         error: needsLogin ? '로그인이 만료됐어요' : err.message,
       };
     }
@@ -722,7 +735,13 @@ ipcMain.handle('mail:list-today', async () => {
         return { ok: true, provider: 'naver', accountKey: account.email, email: account.email, ...summary };
       } catch (err) {
         console.error(`Failed to list today's mail for Naver '${account.email}':`, err);
-        return { ok: false, provider: 'naver', accountKey: account.email, error: err.message };
+        return {
+          ok: false,
+          provider: 'naver',
+          accountKey: account.email,
+          transient: isTransientNetworkError(err),
+          error: err.message,
+        };
       }
     })
   );

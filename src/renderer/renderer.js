@@ -614,7 +614,10 @@ function updateMailUnreadDot() {
 }
 
 /** Merges a fresh listTodayMail() response into `mailAccounts` — adds rows for any account seen for the first time (Gmail or Naver, per its own `provider` field), updates the rest in place, and leaves an account's last-known data alone if this round's fetch for it failed. Safe to call whether or not the panel is open (it also drives the header dot). */
-async function loadMailSummary() {
+const MAIL_RETRY_DELAY_MS = 60 * 1000;
+let mailRetryTimer = null;
+
+async function loadMailSummary(isRetry = false) {
   if (mailOpen) mailProgressBar.start();
   const res = await window.calendarAPI.listTodayMail();
   if (mailOpen) mailProgressBar.finish();
@@ -653,6 +656,19 @@ async function loadMailSummary() {
   // main.js is the source of truth — an account it dropped (a duplicate it
   // just unregistered) shouldn't linger here from an earlier load.
   mailAccounts = mailAccounts.filter((a) => res.accounts.some((r) => r.accountKey === a.id));
+
+  // A network hiccup (DNS/connection failing right after boot or wake) would
+  // otherwise leave "연결 실패" up until the next hourly check or a manual
+  // refresh. Retry once, a minute later — only once, so a connection that's
+  // really down isn't hammered; after that it's back to the normal schedule.
+  clearTimeout(mailRetryTimer);
+  mailRetryTimer = null;
+  if (!isRetry && res.accounts.some((a) => !a.ok && a.transient)) {
+    mailRetryTimer = setTimeout(() => {
+      mailRetryTimer = null;
+      loadMailSummary(true);
+    }, MAIL_RETRY_DELAY_MS);
+  }
 
   updateMailUnreadDot();
   if (mailOpen && mailView === 'list') renderMailPanel();
