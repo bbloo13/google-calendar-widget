@@ -1,0 +1,525 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: #14141a;
+  color: #e8e8ea;
+  font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
+  overflow: hidden;
+}
+
+/* A themed stand-in for alert() — see showToast() in renderer.js. */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  max-width: calc(100% - 32px);
+  background: #232329;
+  color: #e8e8ea;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.toast.is-danger {
+  border-color: rgba(255, 100, 100, 0.3);
+  color: #ff8787;
+}
+
+.notes {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.notes__titlebar {
+  flex: 0 0 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 140px 0 14px; /* right padding reserves room for the Windows caption buttons */
+  background: #1c1c22;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  -webkit-app-region: drag;
+}
+
+.notes__titlebarIcon {
+  font-size: 14px;
+}
+
+.notes__titlebarText {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #e8e8ea;
+  letter-spacing: 0.02em;
+}
+
+.notes__searchInput {
+  -webkit-app-region: no-drag;
+  margin-left: auto;
+  width: 220px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  color: #e8e8ea;
+  font-size: 12px;
+  padding: 5px 10px;
+}
+
+.notes__searchInput::placeholder {
+  color: #6f6f83;
+}
+
+.notes__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+}
+
+.notes__sidebar {
+  flex: 0 0 200px;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.notes__sidebarHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #6f6f83;
+  padding: 4px 8px 10px;
+}
+
+.notes__categoryList {
+  position: relative; /* anchors .notes__dropLine's absolute positioning */
+  list-style: none;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notes__categoryItem {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #b8b8c4;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.notes__categoryToggle {
+  flex: 0 0 12px;
+  font-size: 9px;
+  color: #6f6f83;
+  text-align: center;
+}
+
+.notes__categoryName {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes__categoryItem:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.notes__categoryItem.is-active {
+  background: rgba(127, 181, 255, 0.14);
+  color: #ffffff;
+}
+
+.notes__categoryCount {
+  font-size: 11px;
+  color: #6f6f83;
+}
+
+.notes__driveLink {
+  margin-top: 8px;
+  border: none;
+  background: transparent;
+  color: #7fb5ff;
+  font-family: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  padding: 6px 8px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.notes__driveLink:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.notes__list {
+  flex: 0 0 240px;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 10px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.notes__listHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: #8f8fa3;
+  padding: 4px 8px 10px;
+}
+
+.notes__noteList {
+  position: relative; /* anchors .notes__dropLine's absolute positioning */
+  list-style: none;
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.notes__noteItem {
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.notes__noteItem:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.notes__noteItem.is-active {
+  background: rgba(127, 181, 255, 0.14);
+}
+
+.notes__noteTitle {
+  font-size: 13px;
+  color: #e8e8ea;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes__noteMeta {
+  font-size: 10.5px;
+  color: #6f6f83;
+  margin-top: 2px;
+}
+
+.notes__editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 18px;
+  min-width: 0;
+}
+
+.notes__editorHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.notes__titleInput {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: #ffffff;
+  font-size: 17px;
+  font-weight: 500;
+  padding: 4px 2px;
+  outline: none;
+}
+
+.notes__titleInput::placeholder {
+  color: #52525f;
+}
+
+.notes__editorBtns {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.notes__saveState {
+  font-size: 11px;
+  color: #6f6f83;
+  min-width: 60px;
+  text-align: right;
+}
+
+.notes__iconBtn {
+  background: transparent;
+  border: none;
+  color: #8f8fa3;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px 9px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.notes__iconBtn:hover:not(:disabled) {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.notes__iconBtn:disabled {
+  color: #444450;
+  cursor: default;
+}
+
+.notes__deleteBtn:hover:not(:disabled) {
+  color: #ff8787;
+  background: rgba(255, 100, 100, 0.12);
+}
+
+.notes__textarea {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e8e8ea;
+  font-size: 14px;
+  line-height: 1.6;
+  font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.notes__textarea:empty::before {
+  content: attr(data-placeholder);
+  color: #52525f;
+}
+
+.notes__textarea[contenteditable="false"] {
+  cursor: default;
+}
+
+/* One line = one block child, so pressing Enter and the strikethrough toggle
+   below can each target "the current line" unambiguously. */
+.notes__textarea > div {
+  min-height: 1.6em;
+}
+
+.notes__textarea .note-line--struck {
+  text-decoration: line-through;
+  color: #6f6f83;
+}
+
+.notes__strikeBtn s {
+  text-decoration: line-through;
+  font-style: normal;
+}
+
+.notes__strikeBtn.is-active {
+  color: #7fb5ff;
+  background: rgba(127, 181, 255, 0.14);
+}
+
+.notes__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.notes__attachments:empty {
+  display: none;
+}
+
+.notes__attachment {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #b8b8c4;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  max-width: 200px;
+}
+
+.notes__attachment:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.notes__attachmentIcon {
+  flex: 0 0 auto;
+  display: inline-block;
+  font-size: 13px;
+}
+
+.notes__attachment.is-downloading .notes__attachmentIcon {
+  animation: notes-attachment-spin 0.8s linear infinite;
+}
+
+@keyframes notes-attachment-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.notes__attachmentName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.notes__attachmentName--editing {
+  min-width: 120px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e8e8ea;
+  font: inherit;
+  padding: 0;
+}
+
+.notes__attachmentRemove {
+  flex: 0 0 auto;
+  opacity: 0;
+  color: #6f6f83;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  border-radius: 3px;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+
+.notes__attachment:hover .notes__attachmentRemove {
+  opacity: 1;
+}
+
+.notes__attachmentRemove:hover {
+  color: #ff8787;
+  background: rgba(255, 100, 100, 0.14);
+}
+
+.notes__editor.is-dragover {
+  outline: 1px dashed #7fb5ff;
+  outline-offset: -4px;
+}
+
+.notes__categoryItem.is-dragging,
+.notes__noteItem.is-dragging {
+  opacity: 0.35;
+}
+
+.notes__categoryItem.is-dragover {
+  outline: 1px dashed #7fb5ff;
+  background: rgba(127, 181, 255, 0.1);
+}
+
+/* Reorder-drag insertion line: one shared element per list (see
+   showDropLine/computeBoundaryY in renderer.js), positioned in JS rather
+   than styled onto whichever row the drag happens to be "before" or
+   "after" — with a `gap` between rows, two independently-styled rows put
+   the line at two different pixels for what's logically the same
+   boundary, which read as jitter switching between them. */
+.notes__dropLine {
+  display: none;
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 2px;
+  background: #7fb5ff;
+  pointer-events: none;
+}
+
+.notes__categoryItem.is-dropNest {
+  outline: 1.5px solid #7fb5ff;
+  background: rgba(127, 181, 255, 0.22);
+}
+
+.notes__categoryList.is-dropRootEnd {
+  box-shadow: inset 0 -2px 0 0 #7fb5ff;
+}
+
+.notes__contextMenu {
+  display: none;
+  position: fixed;
+  flex-direction: column;
+  background: #232329;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 120px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+
+.notes__contextMenu.is-visible {
+  display: flex;
+}
+
+.notes__contextMenuItem {
+  background: transparent;
+  border: none;
+  color: #e8e8ea;
+  text-align: left;
+  font-size: 12.5px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.notes__contextMenuItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.notes__contextMenuItem--danger:hover {
+  background: rgba(255, 100, 100, 0.14);
+  color: #ff8787;
+}
+
+/* thin themed scrollbars, consistent with the calendar widget */
+.notes__categoryList::-webkit-scrollbar,
+.notes__noteList::-webkit-scrollbar,
+.notes__textarea::-webkit-scrollbar {
+  width: 4px;
+}
+
+.notes__categoryList::-webkit-scrollbar-thumb,
+.notes__noteList::-webkit-scrollbar-thumb,
+.notes__textarea::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}

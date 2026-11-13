@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <title>메모장</title>
+  <link rel="stylesheet" href="../shared/shared.css" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="notes" id="notes">
+    <div class="notes__titlebar">
+      <span class="notes__titlebarIcon">🗒️</span>
+      <span class="notes__titlebarText">메모장</span>
+      <input type="text" id="searchInput" class="notes__searchInput" placeholder="제목·본문 검색" />
+    </div>
+
+    <div class="notes__body">
+      <aside class="notes__sidebar">
+        <div class="notes__sidebarHeader">
+          <span>카테고리</span>
+          <button class="notes__iconBtn" id="addCategoryBtn" title="카테고리 추가">+</button>
+        </div>
+        <div class="progressBarTrack"><div class="progressBar" id="categoryProgressBar"></div></div>
+        <ul class="notes__categoryList" id="categoryList"></ul>
+        <button class="notes__driveLink" id="openDriveBtn">Google Drive에서 열기 ↗</button>
+      </aside>
+
+      <section class="notes__list">
+        <div class="notes__listHeader">
+          <span id="listTitle">카테고리를 선택하세요</span>
+          <button class="notes__iconBtn" id="addNoteBtn" title="새 메모" disabled>+</button>
+        </div>
+        <div class="progressBarTrack"><div class="progressBar" id="noteProgressBar"></div></div>
+        <ul class="notes__noteList" id="noteList"></ul>
+      </section>
+
+      <section class="notes__editor">
+        <div class="notes__editorHeader">
+          <input class="notes__titleInput" id="titleInput" placeholder="메모 제목" disabled />
+          <div class="notes__editorBtns">
+            <span class="notes__saveState" id="saveState"></span>
+            <button class="notes__iconBtn notes__strikeBtn" id="strikeBtn" title="현재 줄 취소선" disabled><s>S</s></button>
+            <button class="notes__iconBtn" id="addToCalendarBtn" title="일정에 추가" disabled>📅</button>
+            <button class="notes__iconBtn notes__deleteBtn" id="deleteNoteBtn" title="메모 삭제" disabled>🗑</button>
+          </div>
+        </div>
+        <div class="progressBarTrack"><div class="progressBar" id="editorProgressBar"></div></div>
+        <div class="notes__attachments" id="attachmentsList"></div>
+        <div class="notes__textarea" id="contentArea" contenteditable="false" data-placeholder="메모를 선택하거나 새로 만들어보세요 (파일을 드래그하거나 사진을 붙여넣을 수 있어요)"></div>
+      </section>
+    </div>
+
+    <div class="notes__contextMenu" id="categoryContextMenu">
+      <button class="notes__contextMenuItem" id="addSubcategoryMenuItem">하위 카테고리 추가</button>
+      <button class="notes__contextMenuItem" id="renameCategoryMenuItem">이름 변경</button>
+      <button class="notes__contextMenuItem notes__contextMenuItem--danger" id="deleteCategoryMenuItem">삭제</button>
+    </div>
+
+  </div>
+
+  <script src="../shared/confirmDialog.js"></script>
+  <script src="../shared/eventPopup.js"></script>
+  <script src="../shared/progressBar.js"></script>
+  <script src="renderer.js"></script>
+</body>
+</html>

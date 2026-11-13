@@ -1,0 +1,875 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  font-family: 'Segoe UI', 'Malgun Gothic', sans-serif;
+  color: #e8e8ea;
+  user-select: none;
+}
+
+/* A themed stand-in for alert() — see showToast() in renderer.js. Anchored
+   inside whichever panel the triggering action belongs to (passed as
+   `container`, each of .widget/.gridPanel/.mailPanel has position:relative
+   for this) — centered on that panel specifically, not the whole window,
+   which would land it in the gap between panels when a side panel is open. */
+.toast {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: calc(100% - 24px);
+  background: #232329;
+  color: #e8e8ea;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 12px;
+  word-break: keep-all; /* don't split a Korean word mid-syllable-block to wrap */
+  overflow-wrap: break-word; /* still wrap the rare unbreakable long token (a URL, etc.) */
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+.toast.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.toast.is-danger {
+  border-color: rgba(255, 100, 100, 0.3);
+  color: #ff8787;
+}
+
+/* Extends the shared confirmDialog (see shared.css) with input fields —
+   used by showNaverLoginDialog() for the one flow in this app that needs
+   actual text entry rather than a plain confirm/cancel choice. */
+.confirmDialog__input {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12.5px;
+  color: #e8e8ea;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+
+.confirmDialog__input:focus {
+  border-color: #7fb5ff;
+}
+
+.confirmDialog__idRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.confirmDialog__input--id {
+  flex: 1;
+  min-width: 0;
+}
+
+.confirmDialog__idSuffix {
+  flex: 0 0 auto;
+  font-size: 12.5px;
+  color: #8f8fa3;
+}
+
+.app {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end; /* keep .widget pinned to the right edge — the OS
+    window resize and the .gridPanel CSS transition don't land at exactly
+    the same moment, and with the default flex-start any leftover slack
+    briefly appeared on the wrong side, reading as .widget jumping left
+    then getting shoved back right. flex-end means slack always shows up
+    on the left, where the grid panel is animating anyway. */
+  gap: 8px;
+}
+
+.widget {
+  position: relative; /* anchors .toast */
+  flex: 0 0 300px;
+  width: 300px;
+  height: 100%;
+  padding: 20px 22px;
+  background: rgba(20, 20, 24, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  backdrop-filter: blur(6px);
+  display: flex;
+  flex-direction: column;
+  -webkit-app-region: drag;
+}
+
+.gridPanel {
+  position: relative; /* anchors .toast for errors raised from this panel */
+  display: none;
+  flex: 0 0 340px;
+  width: 340px;
+  height: 100%;
+  padding: 16px 14px;
+  background: rgba(20, 20, 24, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  backdrop-filter: blur(6px);
+  flex-direction: column;
+  -webkit-app-region: drag;
+}
+
+.gridPanel.is-visible {
+  display: flex;
+}
+
+.gridPanel__nav {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.gridPanel__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e8e8ea;
+  min-width: 92px;
+  text-align: center;
+}
+
+.gridPanel__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  margin-bottom: 4px;
+}
+
+.gridPanel__weekdays span {
+  text-align: center;
+  font-size: 10.5px;
+  color: #6f6f83;
+  padding: 4px 0;
+}
+
+.gridPanel__weeks {
+  -webkit-app-region: no-drag;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding-right: 4px;
+}
+
+.gridPanel__weeks::-webkit-scrollbar {
+  width: 4px;
+}
+
+.gridPanel__weeks::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}
+
+.weekRow {
+  position: relative;
+  flex: 1 1 0;
+}
+
+.weekRow__cells {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  height: 100%;
+}
+
+.gridPanel__cell {
+  position: relative;
+  border: none;
+  background: transparent;
+  color: #b8b8c4;
+  font-size: 11.5px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 2px;
+  gap: 2px;
+  transition: background 0.15s;
+}
+
+.gridPanel__cell:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.gridPanel__cell.is-outside {
+  color: #4a4a56;
+}
+
+.gridPanel__cell.is-today {
+  /* A border around the whole cell (number + its event tags), not just a
+     ring on the number — a small ring alone (tried first, in a couple of
+     colors) never read as more than a slightly-off event tag. */
+  border: 2px solid rgba(255, 255, 255, 0.85);
+}
+
+.gridPanel__cell.is-today .gridPanel__cellNum {
+  font-weight: 700;
+  color: #ffffff;
+}
+
+.gridPanel__cell.is-selected {
+  background: rgba(127, 181, 255, 0.14);
+}
+
+.gridPanel__cellNum {
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  border-radius: 50%;
+  font-size: 11px;
+}
+
+.gridPanel__dots {
+  display: flex;
+  gap: 2px;
+  height: 4px;
+  align-items: center;
+  justify-content: center;
+}
+
+.gridPanel__dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+}
+
+.weekRow__bars {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 20px;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  grid-auto-rows: 11px;
+  gap: 1px 3px;
+  pointer-events: none;
+  padding: 0 1px;
+}
+
+.weekRow__bar {
+  font-size: 9px;
+  line-height: 11px;
+  color: #0f1116;
+  padding: 0 4px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-weight: 600;
+}
+
+.weekRow__bar.is-start {
+  border-top-left-radius: 5px;
+  border-bottom-left-radius: 5px;
+}
+
+.weekRow__bar.is-end {
+  border-top-right-radius: 5px;
+  border-bottom-right-radius: 5px;
+}
+
+/* Mail panel — same shell as .gridPanel (only one of the two is ever
+   .is-visible at once, see the mail/grid toggle handlers), account rows
+   expand in place like the notes window's category tree, and opening a
+   message swaps .mailPanel__body's content for a reading view. */
+.mailPanel {
+  position: relative; /* anchors .toast for errors raised from this panel */
+  display: none;
+  flex: 0 0 340px;
+  width: 340px;
+  height: 100%;
+  padding: 16px 14px;
+  background: rgba(20, 20, 24, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  backdrop-filter: blur(6px);
+  flex-direction: column;
+  -webkit-app-region: drag;
+}
+
+.mailPanel.is-visible {
+  display: flex;
+}
+
+.mailPanel__nav {
+  -webkit-app-region: no-drag;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.mailPanel__label {
+  font-size: 13px;
+  font-weight: 500;
+  color: #e8e8ea;
+  min-width: 92px;
+  text-align: center;
+}
+
+.mailPanel__body {
+  -webkit-app-region: no-drag;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+.mailPanel__body::-webkit-scrollbar {
+  width: 4px;
+}
+
+.mailPanel__body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}
+
+.mailAccount {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: #e8e8ea;
+}
+
+.mailAccount--account {
+  padding-left: 26px;
+}
+
+.mailAccount:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mailAccount__toggle {
+  width: 12px;
+  font-size: 10px;
+  color: #6f6f83;
+  text-align: center;
+}
+
+.mailAccount__name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailAccount__name--provider {
+  color: #7fb5ff;
+  font-weight: 500;
+}
+
+.mailAccount__addBtn {
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  color: #6f6f83;
+  font-size: 13px;
+  line-height: 1;
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.mailAccount__addBtn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.mailPanel__empty--account {
+  padding-left: 26px;
+  text-align: left;
+}
+
+.mailPanel__empty--message {
+  padding-left: 56px;
+  text-align: left;
+}
+
+.mailAccount__badge {
+  flex: 0 0 auto;
+  background: rgba(127, 181, 255, 0.18);
+  color: #7fb5ff;
+  font-size: 10.5px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  text-align: center;
+}
+
+.mailAccount__badge--error {
+  background: rgba(255, 100, 100, 0.16);
+  color: #ff8787;
+}
+
+.mailAccount__badge--action {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.mailAccount__badge--action:hover {
+  background: rgba(255, 100, 100, 0.28);
+}
+
+.mailMessage {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px 6px 56px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.mailMessage:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.mailMessage__subject {
+  font-size: 12px;
+  color: #b8b8c4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailMessage.is-unread .mailMessage__subject {
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.mailMessage__meta {
+  font-size: 10.5px;
+  color: #6f6f83;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailPanel__empty {
+  padding: 10px 8px;
+  font-size: 12px;
+  color: #6f6f83;
+  text-align: center;
+}
+
+.mailReading__subject {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ffffff;
+  margin-bottom: 4px;
+  padding: 0 4px;
+}
+
+.mailReading__fromRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 0 4px;
+}
+
+.mailReading__from {
+  font-size: 11.5px;
+  color: #8f8fa3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mailReading__actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+
+.mailReading__cleaningNotice {
+  font-size: 10.5px;
+  color: #7fb5ff;
+  padding: 0 4px;
+  margin-bottom: 8px;
+}
+
+.mailReading__translateBtn {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #7fb5ff;
+  font-size: 10.5px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+}
+
+.mailReading__translateBtn:hover {
+  background: rgba(127, 181, 255, 0.12);
+}
+
+.mailReading__attachmentNotice {
+  font-size: 11.5px;
+  color: #7fb5ff;
+  background: rgba(127, 181, 255, 0.1);
+  border-radius: 6px;
+  padding: 6px 8px;
+  margin: 0 4px 10px;
+}
+
+.mailReading__body {
+  font-size: 12px;
+  line-height: 1.55;
+  color: #d5d5da;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 0 4px;
+}
+
+.widget__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.widget__weekday {
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  color: #8f8fa3;
+  text-transform: uppercase;
+}
+
+.widget__daynum {
+  font-size: 40px;
+  font-weight: 300;
+  line-height: 1.1;
+  color: #ffffff;
+}
+
+.widget__month {
+  font-size: 13px;
+  color: #8f8fa3;
+  margin-top: 2px;
+}
+
+.widget__headerBtns {
+  -webkit-app-region: no-drag;
+  display: flex;
+  gap: 4px;
+}
+
+.widget__iconBtn {
+  position: relative; /* anchors .widget__iconBtn__dot */
+  background: transparent;
+  border: none;
+  color: #8f8fa3;
+  font-size: 15px;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: color 0.15s, background 0.15s, transform 0.4s;
+}
+
+.widget__iconBtn__dot {
+  display: none;
+  position: absolute;
+  top: 2px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ff8787;
+}
+
+.widget__iconBtn__dot.is-visible {
+  display: block;
+}
+
+.widget__iconBtn:hover {
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.widget__iconBtn svg {
+  display: block;
+}
+
+.widget__iconBtn.is-active {
+  color: #7fb5ff;
+  background: rgba(127, 181, 255, 0.14);
+}
+
+#refreshBtn.spinning {
+  transform: rotate(360deg);
+}
+
+.widget__viewToggle {
+  -webkit-app-region: no-drag;
+  display: flex;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 14px;
+  width: fit-content;
+}
+
+.widget__viewBtn {
+  border: none;
+  background: transparent;
+  color: #8f8fa3;
+  font-size: 11.5px;
+  font-weight: 500;
+  padding: 4px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.widget__viewBtn:hover {
+  color: #ffffff;
+}
+
+.widget__viewBtn.is-active {
+  background: rgba(255, 255, 255, 0.12);
+  color: #ffffff;
+}
+
+.widget__agenda {
+  -webkit-app-region: no-drag;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.widget__agenda::-webkit-scrollbar {
+  width: 4px;
+}
+
+.widget__agenda::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+}
+
+.widget__section {
+  margin-bottom: 14px;
+}
+
+.widget__section-title {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: #6f6f83;
+  margin-bottom: 8px;
+}
+
+.widget__section-title.is-today {
+  color: #7fb5ff;
+}
+
+.widget__list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.widget__item {
+  font-size: 13px;
+  line-height: 1.4;
+  border-radius: 6px;
+}
+
+.widget__item-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  cursor: pointer;
+  padding: 2px 4px;
+  margin: 0 -4px;
+  border-radius: 6px;
+  transition: background 0.15s;
+}
+
+.widget__item-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.widget__item.is-expanded .widget__item-row {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.widget__item-detail {
+  margin: 4px 0 2px 4px;
+  padding: 6px 8px;
+  border-left: 2px solid rgba(127, 181, 255, 0.4);
+  font-size: 12px;
+  color: #b8b8c4;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.widget__item-location {
+  color: #7fb5ff;
+  margin-bottom: 4px;
+  font-size: 11.5px;
+}
+
+.widget__item-description {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.widget__item-time {
+  flex: 0 0 auto;
+  min-width: 52px;
+  color: #7fb5ff;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.widget__item-title {
+  color: #e8e8ea;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.widget__empty {
+  font-size: 12.5px;
+  color: #5f5f70;
+  font-style: normal;
+}
+
+.widget__footer {
+  -webkit-app-region: no-drag;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.widget__driveLink {
+  border: none;
+  background: transparent;
+  color: #7fb5ff;
+  font-size: 10.5px;
+  padding: 2px 4px;
+  margin: -2px -4px;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.widget__driveLink:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.widget__footerTime {
+  font-size: 10.5px;
+  color: #52525f;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.widget__item-description {
+  cursor: text;
+}
+
+.widget__item-description a {
+  color: #7fb5ff;
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+
+.widget__item-description ul,
+.widget__item-description ol {
+  padding-left: 18px;
+}
+
+.widget__item-description-input {
+  width: 100%;
+  min-height: 48px;
+  resize: vertical;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(127, 181, 255, 0.3);
+  border-radius: 4px;
+  color: #e8e8ea;
+  font: inherit;
+  padding: 4px 6px;
+}
+
+.widget__contextMenu {
+  -webkit-app-region: no-drag;
+  display: none;
+  position: fixed;
+  flex-direction: column;
+  background: #232329;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 100px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+}
+
+.widget__contextMenu.is-visible {
+  display: flex;
+}
+
+.widget__contextMenuItem {
+  background: transparent;
+  border: none;
+  color: #e8e8ea;
+  text-align: left;
+  font-size: 12.5px;
+  padding: 7px 10px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+.widget__contextMenuItem:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.widget__contextMenuItem--danger:hover {
+  background: rgba(255, 100, 100, 0.14);
+  color: #ff8787;
+}
